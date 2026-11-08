@@ -14,7 +14,7 @@ import streamlit as st
 from ezsnack import qbo as qbo_mod
 from ezsnack.consolidar import consolidar, leer_vendor_list, leer_ventas, resumen_por_maquina, vista_previa_impuesto
 from ezsnack.emparejar import guardar_alias
-from ezsnack.preparar import cargar_datos, ejecutar_limpieza, es_sandbox, plan_limpieza, resumen_plan
+from ezsnack.preparar import cargar_datos, cargar_recibos_prueba, ejecutar_limpieza, es_sandbox, plan_limpieza, resumen_plan
 from ezsnack.servicios import (
     armar_recibos, calcular_comisiones, enviar_recibos, id_cliente_ventas, productos_qbo,
     registrar_comisiones, revisar_recibos, ultimo_dia,
@@ -241,6 +241,15 @@ with tab_preparar:
                     for linea in cargar_datos(qbo):
                         st.write("✅ " + linea)
                     lista_productos.clear()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+
+        st.markdown("**Paso 3 (opcional) · Recibos de prueba para la pestaña 2**")
+        if st.button("Cargar 2 recibos de prueba (Walmart y H-E-B, septiembre 2026)"):
+            with st.spinner("Creando recibos de prueba..."):
+                try:
+                    for linea in cargar_recibos_prueba(qbo):
+                        st.write("✅ " + linea)
                 except Exception as exc:  # noqa: BLE001
                     st.error(str(exc))
 

@@ -125,3 +125,40 @@ def cargar_datos(qbo: QBO) -> list[str]:
     })
     log.append("Cliente de ventas listo.")
     return log
+
+
+RECIBOS_PRUEBA = [
+    {"proveedor": "Walmart", "fecha": "2026-09-12", "lineas": [
+        ("DORITOS NCH 1OZ 028400090858", 9.98), ("LAYS CLASSIC 1 OZ", 7.48),
+        ("222 CLOROX WIPES", 5.47), ("TFL TAX", 1.18)]},
+    {"proveedor": "H-E-B", "fecha": "2026-09-23", "lineas": [
+        ("GATORADE 20OZ VARIETY", 14.97), ("COCA COLA 12OZ 12PK", 8.98),
+        ("MONSTER ENERGY 16OZ", 11.96), ("SALES TAX", 2.97)]},
+]
+
+
+def cargar_recibos_prueba(qbo: QBO) -> list[str]:
+    """Crea 2 gastos de prueba como los deja el lector de recibos de QuickBooks (texto abreviado y renglon de TAX)."""
+    banco = qbo.query("select * from Account where AccountType = 'Bank'")
+    if not banco:
+        banco = [qbo.crear("Account", {"Name": "Cuenta bancaria EzSnack", "AccountType": "Bank"})]
+    costo = _cuenta(qbo, CATALOGO["cuentas"]["costo_mercancia"], "Cost of Goods Sold")
+    log = []
+    for r in RECIBOS_PRUEBA:
+        nota = f"Recibo de prueba {r['proveedor']} {r['fecha']}"
+        if qbo.query(f"select Id from Purchase where TxnDate = '{r['fecha']}'"):
+            log.append(f"Ya existia: {nota}")
+            continue
+        vendedor = _asegurar(qbo, "Vendor", r["proveedor"], {"DisplayName": r["proveedor"]})
+        qbo.crear("Purchase", {
+            "PaymentType": "CreditCard" if banco[0].get("AccountType") == "Credit Card" else "Cash",
+            "AccountRef": {"value": banco[0]["Id"]},
+            "EntityRef": {"value": vendedor, "type": "Vendor"},
+            "TxnDate": r["fecha"], "PrivateNote": nota,
+            "Line": [{
+                "DetailType": "AccountBasedExpenseLineDetail", "Amount": monto, "Description": texto,
+                "AccountBasedExpenseLineDetail": {"AccountRef": {"value": costo}},
+            } for texto, monto in r["lineas"]],
+        })
+        log.append(f"Creado: {nota}")
+    return log
