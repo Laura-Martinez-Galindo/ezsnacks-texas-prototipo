@@ -1,0 +1,38 @@
+{
+  "_nota": "Que columna del Excel de cada sistema corresponde a cada dato. 'Machine' y 'Product' se vieron en las capturas del taller; las demas columnas son SUPUESTAS hasta tener un Excel real de Humberto. Si el archivo real usa otros nombres, solo se cambian aqui.",
+  "Nayax": {
+    "maquina": "Machine",
+    "producto": "Product",
+    "cantidad": "Quantity",
+    "valor": "Total",
+    "medio_pago": "Payment Method",
+    "fecha": "Date"
+  },
+  "AB360": {
+    "maquina": "Machine Name",
+    "producto": "Item",
+    "cantidad": "Qty Sold",
+    "valor": "Sales $",
+    "medio_pago": "Tender",
+    "fecha": "Sale Date"
+  },
+  "Otro": {
+    "maquina": "Machine",
+    "producto": "Product",
+    "cantidad": "Qty",
+    "valor": "Amount",
+    "medio_pago": "Payment",
+    "fecha": "Date"
+  },
+  "vendor_list": {
+    "id_maquina": "ID",
+    "locacion": "Locacion",
+    "direccion": "Direccion",
+    "ciudad": "Ciudad",
+    "estado": "Estado",
+    "zip": "ZIP",
+    "sistema": "Sistema",
+    "socio": "Socio",
+    "pct_comision": "Comision %"
+  }
+}

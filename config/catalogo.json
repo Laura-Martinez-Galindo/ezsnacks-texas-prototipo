@@ -1,0 +1,54 @@
+{
+  "_nota": "Datos de PRUEBA para el sandbox. Los nombres de productos salen de las capturas del Explorer Workshop; los precios son supuestos. Reemplazar con el catalogo real de EzSnack.",
+  "productos": [
+    {"nombre": "Famous Amos Cookies", "precio": 1.75, "gravable": true},
+    {"nombre": "Flamin Hot Munchies", "precio": 1.75, "gravable": true},
+    {"nombre": "Fritos Flavor Twist", "precio": 1.75, "gravable": true},
+    {"nombre": "Chester's Flamin Hot Fries", "precio": 1.75, "gravable": true},
+    {"nombre": "Doritos Cool Ranch", "precio": 2.00, "gravable": true},
+    {"nombre": "Doritos Sweet Chili", "precio": 2.00, "gravable": true},
+    {"nombre": "Doritos Nacho Cheese 1 oz", "precio": 1.75, "gravable": true},
+    {"nombre": "Lays Classic 1 oz", "precio": 1.50, "gravable": true},
+    {"nombre": "Lays Baked Chips Variety", "precio": 1.75, "gravable": true},
+    {"nombre": "Mrs Freshley's Chocolate Cupcakes", "precio": 2.00, "gravable": true},
+    {"nombre": "Duchess Big Honey Bun Glazed 4 oz", "precio": 2.25, "gravable": true},
+    {"nombre": "Pop Tarts Frosted Strawberry 2 pack", "precio": 2.00, "gravable": true},
+    {"nombre": "KitKat", "precio": 1.75, "gravable": true},
+    {"nombre": "Reese's 2 Peanut Butter Cups", "precio": 1.75, "gravable": true},
+    {"nombre": "Peanut M&M's Chocolate Candies", "precio": 1.75, "gravable": true},
+    {"nombre": "Clif Bar Chocolate Chip", "precio": 2.50, "gravable": true},
+    {"nombre": "Pepsi 20 oz", "precio": 2.50, "gravable": true},
+    {"nombre": "Classic Coke 12 oz", "precio": 1.75, "gravable": true},
+    {"nombre": "Diet Coke 16 oz", "precio": 2.25, "gravable": true},
+    {"nombre": "Dr Pepper 12 fl oz can", "precio": 1.75, "gravable": true},
+    {"nombre": "Sunkist 12 oz", "precio": 1.75, "gravable": true},
+    {"nombre": "Gatorade Variety 20 oz", "precio": 2.50, "gravable": true},
+    {"nombre": "Gatorade Zero Lemon Lime", "precio": 2.50, "gravable": true},
+    {"nombre": "Powerade 20 oz", "precio": 2.25, "gravable": true},
+    {"nombre": "Monster Energy Drink 16 Fl Oz", "precio": 3.50, "gravable": true},
+    {"nombre": "Ghost Energy Zero Sugar 16.9 Fl Oz", "precio": 3.50, "gravable": true},
+    {"nombre": "Celsius Variety 12 oz", "precio": 3.25, "gravable": true},
+    {"nombre": "Red Bull Juneberry", "precio": 3.75, "gravable": true},
+    {"nombre": "Ozarka Water 20 oz", "precio": 1.50, "gravable": false},
+    {"nombre": "Ozarka Water 16 oz", "precio": 1.25, "gravable": false},
+    {"nombre": "Bubly Sparkling Water", "precio": 1.75, "gravable": false}
+  ],
+  "proveedores": [
+    {"nombre": "Sam's Club", "tipo": "reventa"},
+    {"nombre": "Costco", "tipo": "reventa"},
+    {"nombre": "Vistar", "tipo": "reventa"},
+    {"nombre": "Walmart", "tipo": "minorista"},
+    {"nombre": "Restaurant Depot", "tipo": "minorista"},
+    {"nombre": "H-E-B", "tipo": "minorista"}
+  ],
+  "socios": [
+    {"nombre": "Socio Locaciones A (prueba)", "pct_comision": 10}
+  ],
+  "cuentas": {
+    "ingresos_ventas": "Ventas en maquinas",
+    "costo_mercancia": "Compra de mercancia para reventa",
+    "impuesto_pagado_compras": "Impuesto pagado en compras",
+    "comisiones": "Comisiones por locacion"
+  },
+  "cliente_ventas": "Consumidores en maquinas"
+}
