@@ -11,7 +11,19 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from ezsnack import qbo as qbo_mod
+import importlib
+
+import ezsnack.consolidar
+import ezsnack.emparejar
+import ezsnack.preparar
+import ezsnack.qbo
+import ezsnack.servicios
+
+# Recarga los modulos en cada ejecucion: asi un 'git pull' se aplica sin reiniciar la app
+for _m in (ezsnack.qbo, ezsnack.emparejar, ezsnack.consolidar, ezsnack.servicios, ezsnack.preparar):
+    importlib.reload(_m)
+
+from ezsnack import qbo as qbo_mod  # noqa: E402
 from ezsnack.consolidar import consolidar, leer_vendor_list, leer_ventas, resumen_por_maquina, vista_previa_impuesto
 from ezsnack.emparejar import guardar_alias
 from ezsnack.preparar import cargar_datos, cargar_recibos_prueba, ejecutar_limpieza, es_sandbox, plan_limpieza, resumen_plan
