@@ -13,9 +13,9 @@ from .qbo import QBO, QBOError
 
 CATALOGO = json.loads(Path("config/catalogo.json").read_text(encoding="utf-8"))
 
-# Orden pensado para borrar primero lo que depende de otras transacciones
+# Orden: primero lo que contiene a otras transacciones (un deposito agrupa pagos, un pago cierra facturas)
 TRANSACCIONES = [
-    "Payment", "BillPayment", "Deposit", "Transfer", "RefundReceipt", "SalesReceipt",
+    "Deposit", "Payment", "BillPayment", "Transfer", "RefundReceipt", "SalesReceipt",
     "CreditMemo", "Invoice", "Estimate", "VendorCredit", "Purchase", "Bill",
     "PurchaseOrder", "JournalEntry", "TimeActivity",
 ]
