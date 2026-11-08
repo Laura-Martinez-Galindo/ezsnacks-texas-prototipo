@@ -19,5 +19,6 @@ if not exist .venv (
   .venv\Scripts\python -m pip install -r requirements.txt
 )
 echo Abriendo EzSnack Impuestos en http://localhost:8501 ...
-.venv\Scripts\python -m streamlit run app.py --server.port 8501
+start "" cmd /c "timeout /t 6 >nul & start http://localhost:8501"
+.venv\Scripts\python -m streamlit run app.py --server.port 8501 --server.headless true --browser.gatherUsageStats false
 pause
