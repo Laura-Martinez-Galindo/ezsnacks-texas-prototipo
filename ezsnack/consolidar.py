@@ -46,7 +46,7 @@ def leer_vendor_list(archivo) -> pd.DataFrame:
     faltan = [c for c in mapa.values() if c not in df.columns]
     if faltan:
         raise ValueError(f"Al vendor list le faltan las columnas: {faltan}")
-    df = df.rename(columns={v: k for k, v in mapa.items()})
+    df = df.rename(columns={v: k for k, v in mapa.items()}).rename(columns={"sistema": "sistema_lista"})
     df["id_maquina"] = df["id_maquina"].astype(str).str.strip().str.upper()
     df["pct_comision"] = pd.to_numeric(df["pct_comision"], errors="coerce").fillna(0)
     df["socio"] = df["socio"].fillna("").astype(str).str.strip()

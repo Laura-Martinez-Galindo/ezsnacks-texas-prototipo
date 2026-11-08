@@ -53,21 +53,29 @@ def url_autorizacion(state: str = "ezsnack") -> str:
     return nuevo_auth_client().get_authorization_url([Scopes.ACCOUNTING], state_token=state)
 
 
-def guardar_tokens(auth: AuthClient) -> None:
-    datos = {
+def _tokens_de(auth: AuthClient) -> dict:
+    return {
         "access_token": auth.access_token,
         "refresh_token": auth.refresh_token,
         "realm_id": auth.realm_id,
         "expira_en": time.time() + int(auth.expires_in or 3600) - 60,
     }
-    TOKENS_FILE.write_text(json.dumps(datos, indent=2))
+
+
+def guardar_tokens(auth: AuthClient) -> None:
+    TOKENS_FILE.write_text(json.dumps(_tokens_de(auth), indent=2))
+
+
+def obtener_tokens(code: str, realm_id: str) -> dict:
+    """Paso 2 de OAuth: cambia el codigo de autorizacion por tokens y los devuelve."""
+    auth = nuevo_auth_client()
+    auth.get_bearer_token(code, realm_id=realm_id)
+    return _tokens_de(auth)
 
 
 def cambiar_codigo_por_tokens(code: str, realm_id: str) -> None:
-    """Paso 2 de OAuth: cambia el código de autorización por tokens y los guarda."""
-    auth = nuevo_auth_client()
-    auth.get_bearer_token(code, realm_id=realm_id)
-    guardar_tokens(auth)
+    """Igual que obtener_tokens, pero los guarda en tokens.json (uso local y scripts)."""
+    TOKENS_FILE.write_text(json.dumps(obtener_tokens(code, realm_id), indent=2))
 
 
 def esta_conectado() -> bool:
@@ -82,10 +90,16 @@ def desconectar() -> None:
 class QBO:
     """Cliente mínimo de la API de contabilidad de QuickBooks Online."""
 
-    def __init__(self) -> None:
-        if not TOKENS_FILE.exists():
-            raise QBOError("No hay conexión con QuickBooks. Conéctese primero.")
-        self.tokens = json.loads(TOKENS_FILE.read_text())
+    def __init__(self, tokens: dict | None = None) -> None:
+        """Con tokens: los usa y los deja actualizados en self.tokens (la web los guarda en la sesion).
+        Sin tokens: los lee y los guarda en tokens.json (scripts y uso local)."""
+        self.en_archivo = tokens is None
+        if tokens is None:
+            if not TOKENS_FILE.exists():
+                raise QBOError("No hay conexión con QuickBooks. Conéctese primero.")
+            tokens = json.loads(TOKENS_FILE.read_text())
+        self.tokens = dict(tokens)
+        self.renovado = False
         env = os.getenv("QBO_ENVIRONMENT", "sandbox")
         self.base = f"{BASE_URLS[env]}/v3/company/{self.tokens['realm_id']}"
 
@@ -96,8 +110,10 @@ class QBO:
         auth = nuevo_auth_client()
         auth.realm_id = self.tokens["realm_id"]
         auth.refresh(refresh_token=self.tokens["refresh_token"])
-        guardar_tokens(auth)
-        self.tokens = json.loads(TOKENS_FILE.read_text())
+        self.tokens = _tokens_de(auth)
+        self.renovado = True
+        if self.en_archivo:
+            TOKENS_FILE.write_text(json.dumps(self.tokens, indent=2))
 
     # ---------- peticiones ----------
     def _peticion(self, metodo: str, ruta: str, *, params=None, json_body=None, reintento=True):

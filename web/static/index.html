@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EzSnack · Impuestos</title>
+  <meta name="description" content="Cierre mensual del impuesto a las ventas de EzSnack Texas, conectado a QuickBooks.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230F3D5E'/><path d='M9 10h14M9 16h10M9 22h14' stroke='%234E9F2D' stroke-width='3' stroke-linecap='round'/></svg>">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&f[]=switzer@400,500,600&display=swap">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <a class="saltar" href="#trabajo">Ir al contenido</a>
+
+  <aside class="riel" aria-label="Pasos del cierre">
+    <div class="marca">
+      <span class="marca-logo" aria-hidden="true"></span>
+      <div>
+        <p class="marca-nombre">EzSnack</p>
+        <p class="marca-sub">Impuestos de Texas</p>
+      </div>
+    </div>
+
+    <nav class="pasos">
+      <button class="paso" data-ir="ventas" aria-current="page"><span class="paso-n">1</span><span>Ventas del mes</span></button>
+      <button class="paso" data-ir="compras"><span class="paso-n">2</span><span>Compras con impuesto pagado</span></button>
+      <button class="paso" data-ir="comisiones"><span class="paso-n">3</span><span>Comisiones</span></button>
+      <button class="paso paso-ajuste" data-ir="sandbox"><span class="paso-n" aria-hidden="true">
+        <svg viewBox="0 0 20 20" width="14" height="14"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm7.4 4.6-1.6.9a6 6 0 0 1-.5 1.2l.5 1.8-1.7 1.7-1.8-.5c-.4.2-.8.4-1.2.5l-.9 1.6h-2.4l-.9-1.6a6 6 0 0 1-1.2-.5l-1.8.5-1.7-1.7.5-1.8a6 6 0 0 1-.5-1.2L2.6 11V8.9l1.6-.9c.1-.4.3-.8.5-1.2l-.5-1.8 1.7-1.7 1.8.5c.4-.2.8-.4 1.2-.5L9.8 1.7h2.4l.9 1.6c.4.1.8.3 1.2.5l1.8-.5 1.7 1.7-.5 1.8c.2.4.4.8.5 1.2l1.6.9z" fill="currentColor"/></svg>
+      </span><span>Preparar el sandbox</span></button>
+    </nav>
+
+    <div class="conexion" id="conexion">
+      <p class="conexion-estado" id="conexion-estado">Revisando conexión…</p>
+      <a class="boton boton-claro" id="btn-conectar" href="/auth/conectar" hidden>Conectar QuickBooks</a>
+      <button class="enlace" id="btn-salir" hidden>Desconectar</button>
+    </div>
+  </aside>
+
+  <main class="trabajo" id="trabajo" tabindex="-1">
+    <header class="cierre">
+      <div>
+        <h1 id="titulo-cierre">Cierre del mes</h1>
+        <p class="cierre-sub" id="vence">La declaración vence el 20 del mes siguiente.</p>
+      </div>
+      <div class="periodo">
+        <label for="mes">Mes</label>
+        <select id="mes"></select>
+        <label for="anio">Año</label>
+        <select id="anio"></select>
+      </div>
+    </header>
+
+    <!-- 1. Ventas -->
+    <section class="vista" id="vista-ventas" aria-labelledby="h-ventas">
+      <h2 id="h-ventas">Ventas del mes</h2>
+      <p class="guia">Suba la lista de máquinas y los reportes de ventas que descarga de cada lector. El programa los une por máquina y producto, separa lo exento y le avisa lo que no reconoce.</p>
+
+      <form id="form-ventas" class="carga">
+        <label class="ranura ranura-principal">
+          <input type="file" name="vendor" accept=".xlsx,.xls,.csv" required>
+          <span class="ranura-titulo">Lista de máquinas</span>
+          <span class="ranura-ayuda">El vendor list con la dirección de cada máquina</span>
+          <span class="ranura-archivo" data-vacio="Elegir archivo"></span>
+        </label>
+        <label class="ranura">
+          <input type="file" name="nayax" accept=".xlsx,.xls,.csv" multiple>
+          <span class="ranura-titulo">Nayax</span>
+          <span class="ranura-archivo" data-vacio="Elegir reportes"></span>
+        </label>
+        <label class="ranura">
+          <input type="file" name="ab360" accept=".xlsx,.xls,.csv" multiple>
+          <span class="ranura-titulo">AB360</span>
+          <span class="ranura-archivo" data-vacio="Elegir reportes"></span>
+        </label>
+        <label class="ranura">
+          <input type="file" name="otro" accept=".xlsx,.xls,.csv" multiple>
+          <span class="ranura-titulo">Otro lector</span>
+          <span class="ranura-archivo" data-vacio="Elegir reportes"></span>
+        </label>
+        <div class="carga-acciones">
+          <button class="boton" type="submit" id="btn-unir">Unir ventas</button>
+          <button class="enlace" type="button" id="btn-ejemplo">Probar con los datos de ejemplo de septiembre</button>
+        </div>
+      </form>
+
+      <div id="resultado-ventas" hidden>
+        <dl class="cifras" id="cifras-ventas"></dl>
+
+        <div class="aviso" id="problemas" hidden>
+          <h3>Antes de enviar, revise esto</h3>
+          <ul class="problemas" id="lista-problemas"></ul>
+        </div>
+
+        <h3>Ventas por máquina</h3>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-maquinas"></table></div>
+        <p class="nota-tabla" id="nota-maquinas"></p>
+
+        <div class="envio">
+          <div>
+            <h3>Enviar a QuickBooks</h3>
+            <p class="guia" id="envio-guia">Se crea un recibo de venta por máquina con su dirección, y QuickBooks calcula el impuesto de Texas, la ciudad o MTA que corresponda. Si el mes ya se envió, no se duplica.</p>
+          </div>
+          <button class="boton" id="btn-enviar">Enviar recibos</button>
+        </div>
+        <div class="tabla-envoltura" id="envoltura-enviados" hidden><table class="tabla" id="tabla-enviados"></table></div>
+      </div>
+    </section>
+
+    <!-- 2. Compras -->
+    <section class="vista" id="vista-compras" aria-labelledby="h-compras" hidden>
+      <h2 id="h-compras">Compras con impuesto pagado</h2>
+      <p class="guia">Cuando compran en Walmart, Restaurant Depot o H-E-B ya pagan el impuesto en la caja. Suba la foto del recibo en QuickBooks, en la sección Receipts o al correo de recibos, y guárdela allá. Aquí se revisa cada renglón contra sus productos.</p>
+      <form class="fechas" id="form-compras">
+        <label>Desde <input type="date" id="desde" required></label>
+        <label>Hasta <input type="date" id="hasta" required></label>
+        <button class="boton" type="submit">Revisar compras</button>
+      </form>
+      <div id="resultado-compras" hidden>
+        <dl class="cifras" id="cifras-compras"></dl>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-compras"></table></div>
+      </div>
+    </section>
+
+    <!-- 3. Comisiones -->
+    <section class="vista" id="vista-comisiones" aria-labelledby="h-comisiones" hidden>
+      <h2 id="h-comisiones">Comisiones</h2>
+      <p class="guia">A quien les consigue una locación le corresponde un porcentaje de lo que venden esas máquinas. El cálculo sale de las ventas que unió en el primer paso.</p>
+      <p class="vacio" id="comisiones-vacio">Primero una las ventas del mes.</p>
+      <div id="resultado-comisiones" hidden>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-comisiones"></table></div>
+        <div class="envio">
+          <p class="guia">Se registra en QuickBooks una factura a nombre de cada socio, cargada a la cuenta de comisiones.</p>
+          <button class="boton" id="btn-comisiones">Registrar comisiones</button>
+        </div>
+        <div class="tabla-envoltura" id="envoltura-com-res" hidden><table class="tabla" id="tabla-com-res"></table></div>
+      </div>
+    </section>
+
+    <!-- Sandbox -->
+    <section class="vista" id="vista-sandbox" aria-labelledby="h-sandbox" hidden>
+      <h2 id="h-sandbox">Preparar el sandbox</h2>
+      <p class="guia">Esto se hace una sola vez en la empresa de prueba de QuickBooks. No funciona en una empresa real.</p>
+      <ol class="etapas">
+        <li class="etapa">
+          <h3>Quitar los datos de ejemplo de Intuit</h3>
+          <p>Las facturas, pagos y gastos de prueba se borran y no se pueden recuperar. Los clientes, proveedores y productos de ejemplo quedan inactivos, porque QuickBooks no deja borrarlos.</p>
+          <button class="boton boton-secundario" id="btn-plan">Ver qué se quitaría</button>
+          <div id="plan" hidden>
+            <div class="tabla-envoltura"><table class="tabla" id="tabla-plan"></table></div>
+            <label class="confirmar">Para continuar escriba BORRAR <input id="confirmacion" autocomplete="off"></label>
+            <button class="boton boton-peligro" id="btn-limpiar" disabled>Quitar datos de ejemplo</button>
+          </div>
+          <div class="progreso" id="prog-limpiar" hidden><span></span></div>
+          <p class="nota" id="res-limpiar"></p>
+        </li>
+        <li class="etapa">
+          <h3>Cargar los datos de EzSnack</h3>
+          <p>Crea las cuentas contables, los productos con su marca de impuesto, los proveedores, el socio de locaciones y el cliente de ventas.</p>
+          <button class="boton boton-secundario" id="btn-cargar">Cargar datos</button>
+          <div class="progreso" id="prog-cargar" hidden><span></span></div>
+          <p class="nota" id="res-cargar"></p>
+        </li>
+        <li class="etapa">
+          <h3>Agregar compras de prueba</h3>
+          <p>Dos recibos de Walmart y H-E-B de septiembre, escritos como los deja el lector de QuickBooks, para probar el segundo paso.</p>
+          <button class="boton boton-secundario" id="btn-recibos">Agregar compras</button>
+          <div class="progreso" id="prog-recibos" hidden><span></span></div>
+          <p class="nota" id="res-recibos"></p>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <aside class="tiquete-zona" aria-label="Resumen del mes">
+    <div class="tiquete" id="tiquete">
+      <div class="tiquete-cabeza">
+        <p class="tiquete-negocio">EZSNACK TEXAS</p>
+        <p>4520 W 34th St Ste G</p>
+        <p>Houston, TX 77092</p>
+      </div>
+      <p class="tiquete-periodo" id="tq-periodo">Cierre</p>
+      <div class="tiquete-cuerpo" id="tq-cuerpo">
+        <p class="tiquete-vacio">Una las ventas para ver el resumen del mes.</p>
+      </div>
+      <p class="tiquete-pie" id="tq-pie">Los valores marcados como estimado son una referencia. El impuesto oficial lo calcula QuickBooks con la dirección de cada máquina.</p>
+    </div>
+  </aside>
+
+  <div class="avisos" id="avisos" role="status" aria-live="polite"></div>
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

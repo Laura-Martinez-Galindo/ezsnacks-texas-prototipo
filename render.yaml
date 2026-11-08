@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ezsnack-impuestos
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn web.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/estado
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: QBO_ENVIRONMENT
+        value: sandbox
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: QBO_REDIRECT_URI
+        sync: false

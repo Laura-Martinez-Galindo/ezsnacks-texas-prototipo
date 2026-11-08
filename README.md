@@ -1,61 +1,52 @@
 # EzSnack Impuestos
 
-Módulo externo que se conecta a **QuickBooks Online** por su API oficial para:
+Prototipo para EzSnack Texas, una empresa de máquinas expendedoras en Houston. Cada mes, el gerente calcula a mano el impuesto a las ventas que le debe al estado de Texas: une los reportes de los lectores de tarjeta de sus máquinas, separa los productos que no pagan impuesto, descuenta lo que compró con impuesto ya pagado y reparte las ventas según la jurisdicción de cada máquina. Este proceso le toma entre tres y cinco días. El prototipo lo reduce a unos pocos pasos sobre el sistema contable que la empresa ya usa, QuickBooks Online.
 
-1. **Unir las ventas** de los lectores (Nayax, AB360 y otros) con el vendor list y enviarlas a QuickBooks como recibos de venta por máquina. Cada recibo lleva la **dirección de la máquina** (`ShipFromAddr`), así que QuickBooks calcula solo el impuesto de Texas, la ciudad de Houston o MTA. Los productos exentos (agua) se marcan en QuickBooks.
-2. **Revisar los recibos** de compras en Walmart, Restaurant Depot y H-E-B que ya se guardaron en QuickBooks. Compara cada renglón con los productos registrados, separa el renglón de impuesto y avisa lo que no reconoce.
-3. **Calcular y registrar las comisiones** de los socios que consiguen locaciones (por ejemplo, 10 %).
+## Cómo funciona
 
-QuickBooks sigue siendo el sistema contable. El módulo no borra nada en QuickBooks y no duplica un mes que ya se envió.
+La página tiene tres pasos que siguen el orden del cierre del mes.
 
-## Estructura
+En el primero se suben la lista de máquinas y los reportes de ventas de cada lector, ya sea Nayax, AB360 u otro. El programa une todas las ventas por máquina y producto, separa el agua, que está exenta, y avisa si encuentra una máquina que no está en la lista o un producto que no reconoce. Cuando el usuario elige a qué producto corresponde un nombre desconocido, el programa lo recuerda para los meses siguientes. Al enviar, se crea en QuickBooks un recibo de venta por máquina con la dirección de esa máquina, y es QuickBooks quien calcula el impuesto del estado, de la ciudad de Houston o del área metropolitana que corresponda.
 
-| Carpeta / archivo | Qué es |
-|---|---|
-| `app.py` | La interfaz para Humberto (Streamlit) |
-| `ezsnack/qbo.py` | Conexión OAuth 2.0 con QuickBooks, tokens y renovación |
-| `ezsnack/consolidar.py` | Lectura y unión de los Excel de los lectores y el vendor list |
-| `ezsnack/emparejar.py` | Reconoce productos por nombre y detecta renglones de impuesto |
-| `ezsnack/servicios.py` | Envía ventas, revisa recibos y registra comisiones en QuickBooks |
-| `config/columnas.json` | Qué columna de cada Excel es cada dato. **Ajustar con los archivos reales** |
-| `config/catalogo.json` | Productos, proveedores, socios y cuentas de prueba |
-| `config/alias.json` | Equivalencias aprendidas ("DORITOS NCH 1OZ" = "Doritos Nacho Cheese 1 oz") |
-| `scripts/preparar_sandbox.py` | Limpia los datos de ejemplo del sandbox y carga los de EzSnack |
-| `scripts/generar_datos_prueba.py` | Crea Excel de prueba en `datos_prueba/` |
-| `tests/` | Pruebas sin conexión (`python -m pytest -q`) |
+En el segundo se revisan las compras hechas en Walmart, Restaurant Depot o H-E-B, que ya pagaron impuesto en la caja. La foto del recibo se sube en QuickBooks, que la lee, y el programa compara cada renglón con los productos registrados, separa el valor del impuesto pagado y marca lo que no reconoce para que el usuario lo confirme.
 
-## Puesta en marcha (computador del equipo o de Humberto)
+En el tercero se calculan las comisiones de quienes le consiguen locaciones a la empresa, a partir de las ventas de sus máquinas, y se registran en QuickBooks como una factura a nombre de cada socio.
 
-1. Instalar Python 3.11 o superior (python.org; en Windows marcar "Add Python to PATH").
-2. Copiar `.env.example` como `.env` y pegar el Client ID y el Client Secret de la app de Intuit
-   (developer.intuit.com > su app > Keys & credentials). **No compartir ni subir `.env`.**
-3. En la app de Intuit, agregar la Redirect URI `http://localhost:8501/`.
-4. Windows: doble clic en `iniciar.bat`. Mac/Linux:
-   ```
-   python -m venv .venv && source .venv/bin/activate
-   pip install -r requirements.txt
-   streamlit run app.py
-   ```
-5. En la página que se abre, clic en **Conectar con QuickBooks** y autorizar la empresa sandbox.
-6. Solo la primera vez, en la pestaña **Preparar sandbox** de la app: *Ver qué se quitaría* → escribir BORRAR → *Quitar datos de ejemplo*, y luego *Cargar productos, proveedores y cuentas de EzSnack*.
-   También se puede por consola:
-   ```
-   python scripts/preparar_sandbox.py --limpiar              # muestra qué se borraría, no cambia nada
-   python scripts/preparar_sandbox.py --limpiar --confirmar  # borra (pide escribir BORRAR)
-   python scripts/preparar_sandbox.py --cargar               # crea productos, proveedores y cuentas de EzSnack
-   ```
+A la derecha, un tiquete parecido al de una máquina resume el mes: ventas, exentas, ventas gravables por jurisdicción, impuesto estimado, impuesto calculado por QuickBooks, impuesto ya pagado en compras y comisiones.
 
-## Despliegue
+## Cómo se conecta con QuickBooks
 
-| Opción | Costo | Para qué sirve | Ojo |
-|---|---|---|---|
-| **Computador local** (`iniciar.bat`) | Gratis | Demo del 24 de noviembre y primeras pruebas de Humberto | Solo funciona en ese computador |
-| **Streamlit Community Cloud** | Gratis | Que Humberto lo use desde un enlace, sin instalar nada | Permite una sola app privada por cuenta; los secretos van en *Settings > Secrets*; la Redirect URI debe ser la URL `https://...streamlit.app/`; si la app se reinicia hay que volver a conectar |
+QuickBooks Online no permite instalar módulos por dentro, así que el prototipo funciona como una aplicación externa conectada por la API oficial de Intuit. QuickBooks sigue siendo el sistema contable y el lugar donde se calcula el impuesto oficial. El programa solo hace lo que QuickBooks no hace por sí mismo: unir los reportes de los distintos lectores, reconocer los productos de los recibos y calcular las comisiones.
 
-Para usarlo con la empresa **real** de Humberto falta pasar la **revisión de la app de Intuit** (llaves de producción: cuestionario de seguridad y 1 a 2 semanas de espera) y cambiar `QBO_ENVIRONMENT=production`.
+Cada persona que entra a la página conecta su propia empresa de QuickBooks. Esa conexión queda guardada de forma cifrada en su navegador y no en el servidor, de modo que nadie puede ver ni modificar una empresa que no haya autorizado. Mientras la aplicación use las llaves de desarrollo de Intuit, solo se puede conectar a empresas de prueba, llamadas sandbox. Para conectarla a la empresa real hace falta pasar la revisión de aplicaciones de Intuit, que incluye un cuestionario de seguridad y toma entre una y dos semanas.
 
-## Supuestos que hay que confirmar con datos reales
+## Probarla sin archivos propios
 
-- Las columnas de los Excel de Nayax y AB360 (`config/columnas.json`). Solo "Machine" y "Product" se vieron en las capturas del taller.
-- Que los montos de los reportes no incluyan el impuesto. Si lo incluyen, hay que descontarlo antes de enviar.
-- Las direcciones exactas de cada máquina en el vendor list.
+En el primer paso hay un enlace para probar con los datos de ejemplo de septiembre de 2026. Esos archivos están en la carpeta datos_prueba y son ficticios: los nombres de productos salen de las capturas del taller con la empresa, las máquinas 158 y 160 tienen sus direcciones reales y las demás usan edificios públicos de Houston, Bellaire y Katy como dirección de ejemplo. Los nombres de columnas de los reportes también son supuestos, porque en el taller solo se alcanzaron a ver las columnas Machine y Product. Cuando lleguen los reportes reales, basta con ajustar el archivo config/columnas.json, sin cambiar el código.
+
+La sección Preparar el sandbox deja la empresa de prueba lista la primera vez. Primero quita los datos de ejemplo que trae Intuit, después carga los productos, proveedores y cuentas de EzSnack y, si se quiere, agrega dos compras de prueba para el segundo paso.
+
+## Publicarla en internet
+
+La aplicación está preparada para Render, que tiene un plan gratuito sin tarjeta de crédito. En ese plan la aplicación se duerme después de quince minutos sin uso y tarda cerca de un minuto en despertar con la siguiente visita.
+
+Para publicarla, se entra a render.com con la cuenta de GitHub, se elige crear un Blueprint y se selecciona este repositorio. Render lee el archivo render.yaml y pide tres valores: el Client ID y el Client Secret de la aplicación de Intuit, y la dirección de regreso, que es la dirección que Render le asigna a la aplicación seguida de /auth/callback. Esa misma dirección de regreso se agrega en la configuración de la aplicación en developer.intuit.com, en Settings, Redirect URIs.
+
+## Correrla en un computador
+
+Se necesita Python 3.11 o superior. Dentro de la carpeta del proyecto se copia el archivo .env.example con el nombre .env, se completan sus valores y se ejecuta:
+
+```
+pip install -r requirements.txt
+uvicorn web.main:app --port 8000
+```
+
+La página queda en http://localhost:8000. Para que la conexión con QuickBooks funcione en el computador, la dirección http://localhost:8000/auth/callback debe estar registrada en la aplicación de Intuit.
+
+## Organización del código
+
+La carpeta ezsnack contiene la lógica: qbo.py maneja la conexión con QuickBooks, consolidar.py une los reportes, emparejar.py reconoce productos por nombre, servicios.py envía ventas, revisa compras y registra comisiones, y preparar.py prepara el sandbox. La carpeta web contiene el servidor, en main.py, y la página, en static. La carpeta config guarda el catálogo de prueba, las columnas de cada reporte, las tarifas de referencia y las equivalencias de nombres aprendidas. Las pruebas automáticas están en tests y se ejecutan con python -m pytest.
+
+## Lo que falta confirmar con la empresa
+
+Falta recibir un reporte real de cada lector para ajustar las columnas, confirmar si los montos de los reportes ya incluyen el impuesto y completar la dirección exacta de cada máquina en la lista. También falta definir sobre qué base se calcula la comisión de cada socio y cada cuánto se paga.
