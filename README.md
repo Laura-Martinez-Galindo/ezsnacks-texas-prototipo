@@ -28,7 +28,7 @@ La sección Preparar el sandbox deja la empresa de prueba lista la primera vez. 
 
 ## Publicarla en internet
 
-La aplicación está preparada para Render, que tiene un plan gratuito sin tarjeta de crédito. En ese plan la aplicación se duerme después de quince minutos sin uso y tarda cerca de un minuto en despertar con la siguiente visita.
+La aplicación está publicada en Render, en https://ezsnack-impuestos.onrender.com, con la instancia más pequeña de pago, que cuesta siete dólares al mes y se cubre con créditos de la cuenta. Así la aplicación siempre está despierta. Si se cambia el plan a free en el archivo render.yaml, queda gratis, pero se duerme después de quince minutos sin uso y tarda cerca de un minuto en despertar con la siguiente visita.
 
 Para publicarla, se entra a render.com con la cuenta de GitHub, se elige crear un Blueprint y se selecciona este repositorio. Render lee el archivo render.yaml y pide tres valores: el Client ID y el Client Secret de la aplicación de Intuit, y la dirección de regreso, que es la dirección que Render le asigna a la aplicación seguida de /auth/callback. Esa misma dirección de regreso se agrega en la configuración de la aplicación en developer.intuit.com, en Settings, Redirect URIs.
 
