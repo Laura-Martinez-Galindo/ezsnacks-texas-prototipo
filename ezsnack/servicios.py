@@ -89,7 +89,7 @@ def enviar_recibos(qbo: QBO, recibos: list[dict]) -> pd.DataFrame:
     """Crea los recibos en QuickBooks. Si ya existe uno con el mismo numero, no lo duplica."""
     resultado = []
     for r in recibos:
-        existente = qbo.query(f"select Id, TotalAmt, TxnTaxDetail from SalesReceipt where DocNumber = '{r['DocNumber']}'")
+        existente = qbo.query(f"select * from SalesReceipt where DocNumber = '{r['DocNumber']}'")
         if existente:
             e = existente[0]
             resultado.append({"recibo": r["DocNumber"], "estado": "ya existia", "total": e.get("TotalAmt"),
