@@ -14,6 +14,7 @@ import streamlit as st
 from ezsnack import qbo as qbo_mod
 from ezsnack.consolidar import consolidar, leer_vendor_list, leer_ventas, resumen_por_maquina, vista_previa_impuesto
 from ezsnack.emparejar import guardar_alias
+from ezsnack.preparar import cargar_datos, ejecutar_limpieza, es_sandbox, plan_limpieza, resumen_plan
 from ezsnack.servicios import (
     armar_recibos, calcular_comisiones, enviar_recibos, id_cliente_ventas, productos_qbo,
     registrar_comisiones, revisar_recibos, ultimo_dia,
@@ -91,8 +92,8 @@ def lista_productos(conectado: bool) -> dict[str, bool]:
 gravables = lista_productos(qbo is not None)
 productos = list(gravables)
 
-tab_ventas, tab_recibos, tab_comisiones, tab_ayuda = st.tabs(
-    ["1. Ventas del mes", "2. Recibos con impuesto pagado", "3. Comisiones", "Ayuda"]
+tab_ventas, tab_recibos, tab_comisiones, tab_preparar, tab_ayuda = st.tabs(
+    ["1. Ventas del mes", "2. Recibos con impuesto pagado", "3. Comisiones", "Preparar sandbox", "Ayuda"]
 )
 
 # ---------------- 1. ventas ----------------
@@ -208,6 +209,40 @@ with tab_comisiones:
             st.metric("Total a pagar en comisiones", dinero(com["comision"].sum()))
             if st.button("Registrar en QuickBooks (factura de proveedor)", disabled=qbo is None):
                 st.dataframe(registrar_comisiones(qbo, com, anio, mes), use_container_width=True, hide_index=True)
+
+# ---------------- preparar sandbox ----------------
+with tab_preparar:
+    st.subheader("Preparar el sandbox (solo la primera vez)")
+    if not es_sandbox():
+        st.error("Esta pestaña solo funciona en el sandbox (QBO_ENVIRONMENT=sandbox).")
+    elif qbo is None:
+        st.info("Conecte QuickBooks primero (barra de la izquierda).")
+    else:
+        st.markdown("**Paso 1 · Quitar los datos de ejemplo de Intuit**")
+        if st.button("Ver qué se quitaría (no cambia nada)"):
+            with st.spinner("Consultando el sandbox..."):
+                st.session_state["plan"] = plan_limpieza(qbo)
+        if "plan" in st.session_state:
+            st.dataframe(pd.DataFrame(resumen_plan(st.session_state["plan"])), hide_index=True)
+            st.warning("Borrar transacciones no se puede deshacer. Clientes, proveedores y productos "
+                       "de ejemplo quedan inactivos (QuickBooks no deja borrarlos).")
+            confirmacion = st.text_input("Para continuar escriba BORRAR")
+            if st.button("Quitar datos de ejemplo", type="primary", disabled=confirmacion.strip() != "BORRAR"):
+                barra = st.progress(0.0)
+                errores = ejecutar_limpieza(qbo, st.session_state.pop("plan"), barra.progress)
+                st.success(f"Listo. {len(errores)} registros no se pudieron quitar (suelen ser del sistema).")
+                if errores:
+                    with st.expander("Ver detalle"):
+                        st.write(errores)
+        st.markdown("**Paso 2 · Cargar los datos de EzSnack**")
+        if st.button("Cargar productos, proveedores y cuentas de EzSnack", type="primary"):
+            with st.spinner("Creando datos en QuickBooks..."):
+                try:
+                    for linea in cargar_datos(qbo):
+                        st.write("✅ " + linea)
+                    lista_productos.clear()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
 
 # ---------------- ayuda ----------------
 with tab_ayuda:

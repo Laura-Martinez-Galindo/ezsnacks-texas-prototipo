@@ -39,7 +39,7 @@ QuickBooks sigue siendo el sistema contable. El módulo no borra nada en QuickBo
 5. En la página que se abre, clic en **Conectar con QuickBooks** y autorizar la empresa sandbox.
 6. Solo la primera vez, preparar el sandbox:
    ```
-   python scripts/preparar_sandbox.py --limpiar              # muestra qué se borraría, no cambia nada
+   # o, más fácil: pestaña "Preparar sandbox" de la app
    python scripts/preparar_sandbox.py --limpiar --confirmar  # borra (pide escribir BORRAR)
    python scripts/preparar_sandbox.py --cargar               # crea productos, proveedores y cuentas de EzSnack
    ```
