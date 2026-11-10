@@ -1,0 +1,63 @@
+{
+  "_nota": "Reglas del cierre mensual de EzSnack Texas, tomadas de la reunión con el gerente el 9 de noviembre de 2026.",
+  "tasa_estado": 6.25,
+  "tasa_compras": 6.25,
+  "descuento_a_tiempo_pct": 0.5,
+  "devoluciones_pct": 3.0,
+  "jurisdicciones": {
+    "Houston": {
+      "codigo": "2101017",
+      "nombre_comptroller": "HOUSTON-CITY",
+      "tasa": 1.0,
+      "ciudades": ["Houston"]
+    },
+    "Houston MTA": {
+      "codigo": "3101990",
+      "nombre_comptroller": "HOUSTON MTA",
+      "tasa": 1.0,
+      "ciudades": ["Bellaire", "Katy", "Spring"]
+    }
+  },
+  "comisiones": [
+    {
+      "socio": "ProCity",
+      "columna": "comision_a",
+      "valor": "ProCity",
+      "descripcion": "10 % de las ventas de cada máquina que consiguió, solo si la máquina vendió más de 300 USD en el mes.",
+      "porcentaje": 10,
+      "minimo_por_maquina": 300,
+      "descuento_tarjeta_pct": 0,
+      "costo_lector_mes": 0
+    },
+    {
+      "socio": "North American University",
+      "columna": "locacion",
+      "valor": "north american university",
+      "descripcion": "10 % de las ventas netas: se descuenta el 5.95 % de lo vendido con tarjeta y 15 USD al mes por cada lector.",
+      "porcentaje": 10,
+      "minimo_por_maquina": 0,
+      "descuento_tarjeta_pct": 5.95,
+      "costo_lector_mes": 15
+    },
+    {
+      "socio": "VMS",
+      "columna": "comision_a",
+      "valor": "VMS",
+      "descripcion": "Aparece en la lista de máquinas, pero la regla no se explicó en la reunión.",
+      "porcentaje": null,
+      "minimo_por_maquina": 0,
+      "descuento_tarjeta_pct": 0,
+      "costo_lector_mes": 0
+    },
+    {
+      "socio": "MR",
+      "columna": "comision_a",
+      "valor": "MR",
+      "descripcion": "Aparece en la lista de máquinas, pero la regla no se explicó en la reunión.",
+      "porcentaje": null,
+      "minimo_por_maquina": 0,
+      "descuento_tarjeta_pct": 0,
+      "costo_lector_mes": 0
+    }
+  ]
+}

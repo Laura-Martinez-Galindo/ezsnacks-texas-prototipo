@@ -3,3 +3,4 @@ tokens.json
 __pycache__/
 *.pyc
 .venv/
+config/verificacion.json

@@ -1,7 +1,8 @@
 """Servidor web de EzSnack Impuestos.
 
-La conexion con QuickBooks de cada persona se guarda cifrada en una cookie de su navegador,
-asi el servidor no guarda tokens y cada quien solo ve la empresa que autorizo.
+Los archivos que sube cada persona se leen en memoria y se guardan un rato con un codigo,
+para recalcular sin volver a subirlos. No se escriben en disco ni en ninguna base de datos.
+La conexion opcional con QuickBooks se guarda cifrada en una cookie del navegador.
 
 Local:   uvicorn web.main:app --reload --port 8000
 """
@@ -9,50 +10,77 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import importlib
 import io
 import json
 import os
 import secrets
 import threading
 import time
-import uuid
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 RAIZ = Path(__file__).resolve().parents[1]
-os.chdir(RAIZ)  # los modulos leen config/ con rutas relativas
 
+from ezsnack import cierre as cie  # noqa: E402
+from ezsnack import contabilidad as conta  # noqa: E402
+from ezsnack import lectores as lec  # noqa: E402
+from ezsnack import libro as lib  # noqa: E402
+from ezsnack import maquinas as maq  # noqa: E402
+from ezsnack import productos as prod  # noqa: E402
 from ezsnack import qbo as qbo_mod  # noqa: E402
-from ezsnack import consolidar as cons  # noqa: E402
-from ezsnack import emparejar as emp  # noqa: E402
-from ezsnack import preparar as prep  # noqa: E402
-from ezsnack import servicios as serv  # noqa: E402
 
 COOKIE = "ezsnack_qbo"
-# Con SESSION_SECRET las sesiones sobreviven a reinicios; sin ella se crea una clave nueva al arrancar
 _secreto = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
 FERNET = Fernet(base64.urlsafe_b64encode(hashlib.sha256(_secreto.encode()).digest()))
-CATALOGO = json.loads(Path("config/catalogo.json").read_text(encoding="utf-8"))
-TARIFAS = {k: v for k, v in json.loads(Path("config/tarifas.json").read_text(encoding="utf-8")).items()
-           if not k.startswith("_")}
 SEGURO = os.getenv("QBO_REDIRECT_URI", "").startswith("https://")
+QBO_LISTO = bool(os.getenv("QBO_CLIENT_ID") and os.getenv("QBO_CLIENT_SECRET"))
+EJEMPLOS = RAIZ / "datos_prueba"
+# Cifras reales de un mes para comparar. Son datos de la empresa: no van en el repositorio,
+# se leen de la variable VERIFICACION_JSON o de config/verificacion.json si existe en el equipo.
+_verif = os.getenv("VERIFICACION_JSON") or (
+    (RAIZ / "config" / "verificacion.json").read_text(encoding="utf-8")
+    if (RAIZ / "config" / "verificacion.json").exists() else "{}")
+try:
+    VERIFICACION = json.loads(_verif)
+except ValueError:
+    VERIFICACION = {}
 
 app = FastAPI(title="EzSnack Impuestos", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=RAIZ / "web" / "static"), name="static")
 
-TRABAJOS: dict[str, dict] = {}
-PLANES: dict[str, dict] = {}
+# Cierres en memoria: codigo -> archivos ya leidos
+CIERRES: dict[str, dict] = {}
+_CANDADO = threading.Lock()
+VIGENCIA = 3 * 60 * 60
 
 
-# ---------------- sesion ----------------
+def _guardar(datos: dict) -> str:
+    codigo = secrets.token_urlsafe(12)
+    with _CANDADO:
+        ahora = time.time()
+        for k in [k for k, v in CIERRES.items() if ahora - v["creado"] > VIGENCIA]:
+            CIERRES.pop(k, None)
+        while len(CIERRES) >= 30:
+            CIERRES.pop(min(CIERRES, key=lambda k: CIERRES[k]["creado"]))
+        CIERRES[codigo] = {**datos, "creado": ahora}
+    return codigo
+
+
+def _cierre(codigo: str) -> dict:
+    c = CIERRES.get(codigo)
+    if not c:
+        raise HTTPException(410, "Los archivos ya no están en memoria. Vuelva a subirlos.")
+    return c
+
+
+# ---------------- sesion de QuickBooks ----------------
 def _leer_tokens(request: Request) -> dict | None:
     valor = request.cookies.get(COOKIE)
     if not valor:
@@ -68,30 +96,11 @@ def _poner_cookie(resp, tokens: dict) -> None:
                     httponly=True, secure=SEGURO, samesite="lax", max_age=60 * 60 * 24 * 90)
 
 
-def _cliente(request: Request) -> qbo_mod.QBO:
-    tokens = _leer_tokens(request)
-    if not tokens:
-        raise HTTPException(401, "Conecte QuickBooks para hacer esto.")
-    return qbo_mod.QBO(tokens)
-
-
-def _responder(datos, qbo: qbo_mod.QBO | None = None):
-    resp = JSONResponse(datos)
-    if qbo is not None and qbo.renovado:
-        _poner_cookie(resp, qbo.tokens)
-    return resp
-
-
-def _df(df: pd.DataFrame) -> list[dict]:
-    return json.loads(df.to_json(orient="records", date_format="iso", force_ascii=False))
-
-
 @app.exception_handler(qbo_mod.QBOError)
 async def _error_qbo(_, exc):
-    return JSONResponse({"detail": str(exc)}, status_code=400)
+    return JSONResponse({"detail": f"QuickBooks respondió: {exc}"}, status_code=400)
 
 
-# ---------------- paginas y conexion ----------------
 @app.get("/")
 def inicio():
     return FileResponse(RAIZ / "web" / "static" / "index.html")
@@ -99,6 +108,8 @@ def inicio():
 
 @app.get("/auth/conectar")
 def conectar():
+    if not QBO_LISTO:
+        raise HTTPException(503, "Esta instalación no tiene las llaves de QuickBooks.")
     estado = secrets.token_urlsafe(16)
     resp = RedirectResponse(qbo_mod.url_autorizacion(estado))
     resp.set_cookie("ezsnack_estado", estado, httponly=True, secure=SEGURO, samesite="lax", max_age=600)
@@ -129,228 +140,149 @@ def salir():
 def estado(request: Request):
     hoy = date.today()
     previo = date(hoy.year if hoy.month > 1 else hoy.year - 1, hoy.month - 1 or 12, 1)
-    datos = {"conectado": False, "empresa": None, "entorno": os.getenv("QBO_ENVIRONMENT", "sandbox"),
-             "anio": previo.year, "mes": previo.month}
+    datos = {"qbo_disponible": QBO_LISTO, "conectado": False, "empresa": None,
+             "entorno": os.getenv("QBO_ENVIRONMENT", "sandbox"), "anio": previo.year, "mes": previo.month,
+             "reglas": cie.reglas()}
     tokens = _leer_tokens(request)
     if not tokens:
         return datos
     try:
         qbo = qbo_mod.QBO(tokens)
         datos.update(conectado=True, empresa=qbo.info_empresa().get("CompanyName"))
-        return _responder(datos, qbo)
+        resp = JSONResponse(datos)
+        if qbo.renovado:
+            _poner_cookie(resp, qbo.tokens)
+        return resp
     except Exception:  # noqa: BLE001
         return datos
 
 
-def _productos(request: Request) -> tuple[dict[str, bool], qbo_mod.QBO | None]:
-    tokens = _leer_tokens(request)
-    if tokens:
-        try:
-            qbo = qbo_mod.QBO(tokens)
-            return {n: d["Taxable"] for n, d in serv.productos_qbo(qbo).items()}, qbo
-        except Exception:  # noqa: BLE001
-            pass
-    return {p["nombre"]: p["gravable"] for p in CATALOGO["productos"]}, None
+# ---------------- cierre ----------------
+def _registros(df: pd.DataFrame) -> list[dict]:
+    return json.loads(df.to_json(orient="records", force_ascii=False))
 
 
-@app.get("/api/productos")
-def productos(request: Request):
-    grav, qbo = _productos(request)
-    return _responder({"productos": sorted(grav)}, qbo)
-
-
-# ---------------- 1. ventas ----------------
-def _unir(vendor_src, fuentes: list[tuple], grav: dict[str, bool]) -> dict:
-    importlib.reload(emp)  # toma alias recien guardados
-    vendor = cons.leer_vendor_list(vendor_src)
-    tablas = [cons.leer_ventas(src, sistema) for src, sistema in fuentes]
-    if not tablas:
-        raise HTTPException(400, "Suba al menos un reporte de ventas.")
-    detalle, problemas = cons.consolidar(tablas, vendor, list(grav))
-    resumen = cons.resumen_por_maquina(detalle)
-    ok = detalle[detalle["producto"].notna()]
-    exentas = float(ok.loc[~ok["producto"].map(lambda p: grav.get(p, True)), "valor"].sum())
-    maquinas = (resumen.groupby(["id_maquina", "locacion", "ciudad"])
-                .agg(productos=("producto", "count"), unidades=("cantidad", "sum"), ventas=("valor", "sum"))
-                .reset_index())
-    sistemas = (detalle.groupby("sistema").agg(lineas=("valor", "size"), ventas=("valor", "sum")).reset_index())
-    return {
-        "metricas": {"lineas": int(len(detalle)), "ventas": round(float(detalle["valor"].sum()), 2),
-                     "exentas": round(exentas, 2), "por_revisar": int(len(problemas)),
-                     "maquinas": int(resumen["id_maquina"].nunique())},
-        "sistemas": _df(sistemas),
-        "problemas": _df(problemas),
-        "maquinas": _df(maquinas),
-        "previa": _df(cons.vista_previa_impuesto(detalle, grav, TARIFAS)),
-        "resumen": _df(resumen),
-        "comisiones": _df(serv.calcular_comisiones(detalle)),
-    }
-
-
-@app.post("/api/ventas/unir")
-async def unir(request: Request, vendor: UploadFile = File(...),
-               nayax: list[UploadFile] = File(default=[]), ab360: list[UploadFile] = File(default=[]),
-               otro: list[UploadFile] = File(default=[])):
-    grav, qbo = _productos(request)
-
-    async def archivo(u: UploadFile):
-        b = io.BytesIO(await u.read())
-        b.name = u.filename or "archivo.xlsx"  # la extension decide si se lee como CSV o Excel
-        return b
-
-    fuentes = []
-    for lista, sistema in ((nayax, "Nayax"), (ab360, "AB360"), (otro, "Otro")):
-        for u in lista:
-            if u.filename:
-                fuentes.append((await archivo(u), sistema))
+def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src) -> dict:
+    if not reportes:
+        raise HTTPException(400, "Suba al menos un reporte de ventas de algún lector.")
     try:
-        datos = _unir(await archivo(vendor), fuentes, grav)
+        lista_maq = maq.leer(*maquinas_src)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return _responder(datos, qbo)
-
-
-@app.post("/api/ventas/ejemplo")
-def unir_ejemplo(request: Request):
-    """Une los archivos de prueba incluidos en el proyecto (para probar sin archivos propios)."""
-    grav, qbo = _productos(request)
-    d = Path("datos_prueba")
-    datos = _unir(d / "vendor_list_PRUEBA.xlsx",
-                  [(d / "nayax_ventas_2026-09_PRUEBA.xlsx", "Nayax"), (d / "ab360_ventas_2026-09_PRUEBA.xlsx", "AB360")],
-                  grav)
-    datos["ejemplo"] = {"anio": 2026, "mes": 9}
-    return _responder(datos, qbo)
-
-
-class Envio(BaseModel):
-    anio: int
-    mes: int
-    resumen: list[dict]
-
-
-@app.post("/api/ventas/enviar")
-def enviar(request: Request, envio: Envio):
-    qbo = _cliente(request)
-    resumen = pd.DataFrame(envio.resumen)
-    recibos = serv.armar_recibos(resumen, serv.productos_qbo(qbo), envio.anio, envio.mes, serv.id_cliente_ventas(qbo))
-    res = serv.enviar_recibos(qbo, recibos)
-    return _responder({"recibos": _df(res)}, qbo)
-
-
-class Alias(BaseModel):
-    texto: str
-    producto: str
-
-
-@app.post("/api/alias")
-def guardar_alias(alias: Alias):
-    emp.guardar_alias(alias.texto, alias.producto)
-    return {"ok": True}
-
-
-# ---------------- 2. recibos ----------------
-@app.get("/api/recibos")
-def recibos(request: Request, desde: date, hasta: date):
-    qbo = _cliente(request)
-    importlib.reload(emp)
-    grav = {n: d["Taxable"] for n, d in serv.productos_qbo(qbo).items()}
-    r = serv.revisar_recibos(qbo, desde, hasta, list(grav))
-    ok = ["alias", "seguro", "producto registrado"]
-    datos = {
-        "renglones": _df(r),
-        "impuesto_pagado": round(float(r.loc[r["estado"] == "impuesto", "monto"].sum()), 2) if not r.empty else 0,
-        "productos_con_impuesto": round(float(r.loc[r["estado"].isin(ok), "monto"].sum()), 2) if not r.empty else 0,
-        "por_revisar": int(r["estado"].isin(["dudoso", "sin_coincidencia"]).sum()) if not r.empty else 0,
-    }
-    return _responder(datos, qbo)
-
-
-# ---------------- 3. comisiones ----------------
-class Comisiones(BaseModel):
-    anio: int
-    mes: int
-    comisiones: list[dict]
-
-
-@app.post("/api/comisiones/registrar")
-def registrar(request: Request, c: Comisiones):
-    qbo = _cliente(request)
-    res = serv.registrar_comisiones(qbo, pd.DataFrame(c.comisiones), c.anio, c.mes)
-    return _responder({"resultado": _df(res)}, qbo)
-
-
-# ---------------- preparar sandbox (tareas largas en segundo plano) ----------------
-def _trabajo(nombre: str, fn) -> str:
-    tid = uuid.uuid4().hex[:10]
-    TRABAJOS[tid] = {"nombre": nombre, "estado": "corriendo", "progreso": 0.0, "resultado": None, "inicio": time.time()}
-
-    def correr():
+    lecturas, errores = [], []
+    for src, nombre in reportes:
         try:
-            TRABAJOS[tid]["resultado"] = fn(lambda p: TRABAJOS[tid].update(progreso=round(p, 3)))
-            TRABAJOS[tid]["estado"] = "listo"
+            lecturas.append(lec.leer(src, nombre))
+        except lec.FormatoDesconocido as exc:
+            errores.append(str(exc))
         except Exception as exc:  # noqa: BLE001
-            TRABAJOS[tid].update(estado="error", resultado=str(exc))
-        TRABAJOS[tid]["progreso"] = 1.0
-
-    threading.Thread(target=correr, daemon=True).start()
-    return tid
-
-
-def _solo_sandbox():
-    if not prep.es_sandbox():
-        raise HTTPException(403, "Esto solo funciona en el sandbox.")
-
-
-@app.post("/api/preparar/plan")
-def plan(request: Request):
-    _solo_sandbox()
-    qbo = _cliente(request)
-    p = prep.plan_limpieza(qbo)
-    PLANES[qbo.tokens["realm_id"]] = p
-    return _responder({"plan": prep.resumen_plan(p)}, qbo)
+            errores.append(f"No se pudo leer {nombre}: {exc}")
+    if not lecturas:
+        raise HTTPException(400, " ".join(errores) or "No se pudo leer ningún reporte.")
+    lista_pag = []
+    if pagados_src:
+        try:
+            lista_pag = prod.leer_lista(*pagados_src)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return {"lecturas": lecturas, "maquinas": lista_maq, "integ": cie.integrar(lecturas, lista_maq),
+            "lista_pagados": lista_pag, "errores": errores}
 
 
-class Confirmacion(BaseModel):
-    confirmacion: str
+def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
+    a = cie.Ajustes.de(ajustes)
+    a.lista_pagados = c["lista_pagados"]
+    res = cie.calcular(c["integ"], a, anio, mes)
+    columnas_maq = ["id_maquina", "maquina", "fuente", "locacion", "ciudad", "jurisdiccion", "comision_a", "en_lista",
+                    "unidades", "efectivo", "tarjeta", "ventas", "exentas", "pagadas", "gravable"]
+    return {
+        "archivos": [{"archivo": l.archivo, "fuente": l.fuente, "periodo": l.periodo, "leidas": l.leidas,
+                      "usadas": int(len(l.filas)), "descartadas": l.descartadas,
+                      "efectivo": round(float(l.filas["efectivo"].sum()), 2),
+                      "tarjeta": round(float(l.filas["tarjeta"].sum()), 2),
+                      "cupones": round(float(l.filas["cupones"].sum()), 2),
+                      "prepago": round(float(l.filas["prepago"].sum() + l.filas["otros"].sum()), 2)}
+                     for l in c["lecturas"]],
+        "errores": c["errores"],
+        "lista_maquinas": int(len(c["maquinas"])),
+        "lista_pagados": c["lista_pagados"],
+        "pasos": res["pasos"], "declaracion": res["declaracion"],
+        "maquinas": _registros(res["maquinas"][columnas_maq].round(2)),
+        "exentos": _registros(res["exentos"].round(2)),
+        "pagados": _registros(res["pagados"].round(2)),
+        "revisar": res["revisar"], "comisiones": res["comisiones"],
+        "productos": sorted(c["integ"]["producto"].dropna().unique().tolist(), key=str.lower),
+        "verificacion": VERIFICACION.get(f"{anio}-{mes:02d}") if c.get("ejemplo") is False else None,
+    }
 
 
-@app.post("/api/preparar/limpiar")
-def limpiar(request: Request, c: Confirmacion):
-    _solo_sandbox()
-    if c.confirmacion.strip() != "BORRAR":
-        raise HTTPException(400, "Escriba BORRAR para confirmar.")
-    qbo = _cliente(request)
-    p = PLANES.pop(qbo.tokens["realm_id"], None)
-    if p is None:
-        raise HTTPException(400, "Primero revise qué se quitaría.")
-    tid = _trabajo("limpieza", lambda prog: prep.ejecutar_limpieza(qbo, p, prog))
-    return _responder({"trabajo": tid}, qbo)
+async def _archivo(u: UploadFile) -> tuple[io.BytesIO, str]:
+    return io.BytesIO(await u.read()), u.filename or "archivo.xlsx"
 
 
-@app.post("/api/preparar/cargar")
-def cargar(request: Request):
-    _solo_sandbox()
-    qbo = _cliente(request)
-    return _responder({"trabajo": _trabajo("carga", lambda _: prep.cargar_datos(qbo))}, qbo)
+@app.post("/api/cierre/archivos")
+async def subir(anio: int, mes: int, maquinas: UploadFile = File(...), reportes: list[UploadFile] = File(...),
+                pagados: UploadFile | None = File(default=None)):
+    reps = [await _archivo(u) for u in reportes if u.filename]
+    pag = await _archivo(pagados) if pagados is not None and pagados.filename else None
+    datos = _leer_todo(await _archivo(maquinas), reps, pag)
+    datos["ejemplo"] = False
+    codigo = _guardar(datos)
+    return {"codigo": codigo, **_resultado(datos, anio, mes, None)}
 
 
-@app.post("/api/preparar/recibos-prueba")
-def recibos_prueba(request: Request):
-    _solo_sandbox()
-    qbo = _cliente(request)
-    return _responder({"trabajo": _trabajo("recibos", lambda _: prep.cargar_recibos_prueba(qbo))}, qbo)
+@app.post("/api/cierre/ejemplo")
+def ejemplo():
+    reps = [(p, p.name) for p in sorted(EJEMPLOS.glob("reporte_*.xlsx"))]
+    datos = _leer_todo((EJEMPLOS / "vendor_list_EJEMPLO.xlsx", "vendor_list_EJEMPLO.xlsx"), reps,
+                       (EJEMPLOS / "compras_impuesto_pagado_EJEMPLO.xlsx", "compras_impuesto_pagado_EJEMPLO.xlsx"))
+    datos["ejemplo"] = True
+    codigo = _guardar(datos)
+    return {"codigo": codigo, "anio": 2026, "mes": 9, **_resultado(datos, 2026, 9, None)}
 
 
-@app.get("/api/trabajos/{tid}")
-def trabajo(tid: str):
-    if tid not in TRABAJOS:
-        raise HTTPException(404, "Esa tarea ya no existe. Vuelva a iniciarla.")
-    return TRABAJOS[tid]
+class Pedido(BaseModel):
+    anio: int
+    mes: int
+    ajustes: dict | None = None
+
+
+@app.post("/api/cierre/{codigo}/calcular")
+def calcular(codigo: str, p: Pedido):
+    return _resultado(_cierre(codigo), p.anio, p.mes, p.ajustes)
+
+
+@app.post("/api/cierre/{codigo}/libro")
+def descargar_libro(codigo: str, p: Pedido):
+    c = _cierre(codigo)
+    a = cie.Ajustes.de(p.ajustes)
+    a.lista_pagados = c["lista_pagados"]
+    res = cie.calcular(c["integ"], a, p.anio, p.mes)
+    datos = lib.libro(res, c["lecturas"], p.anio, p.mes)
+    nombre = f"Cierre_impuestos_EzSnack_{p.anio}-{p.mes:02d}.xlsx"
+    return Response(datos, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+@app.post("/api/cierre/{codigo}/registrar")
+def registrar(request: Request, codigo: str, p: Pedido):
+    tokens = _leer_tokens(request)
+    if not tokens:
+        raise HTTPException(401, "Conecte QuickBooks para registrar el cierre.")
+    c = _cierre(codigo)
+    a = cie.Ajustes.de(p.ajustes)
+    a.lista_pagados = c["lista_pagados"]
+    res = cie.calcular(c["integ"], a, p.anio, p.mes)
+    qbo = qbo_mod.QBO(tokens)
+    resp = JSONResponse({"registros": conta.registrar(qbo, res, p.anio, p.mes)})
+    if qbo.renovado:
+        _poner_cookie(resp, qbo.tokens)
+    return resp
 
 
 @app.get("/api/datos-prueba/{archivo}")
 def descargar_prueba(archivo: str):
-    ruta = (Path("datos_prueba") / archivo).resolve()
-    if ruta.parent != (RAIZ / "datos_prueba").resolve() or not ruta.exists():
+    ruta = (EJEMPLOS / archivo).resolve()
+    if ruta.parent != EJEMPLOS.resolve() or not ruta.exists():
         raise HTTPException(404, "No existe ese archivo de prueba.")
     return FileResponse(ruta, filename=archivo)

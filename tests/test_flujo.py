@@ -1,79 +1,81 @@
-"""Pruebas sin conexion: corren con los Excel de datos_prueba/.  Uso: python -m pytest -q"""
-import json
+"""Pruebas sin conexion con los archivos de datos_prueba/.  Uso: python -m pytest -q"""
 from pathlib import Path
 
+import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
-from ezsnack.consolidar import (consolidar, extraer_id_maquina, leer_vendor_list, leer_ventas,
-                                resumen_por_maquina, vista_previa_impuesto)
-from ezsnack.emparejar import emparejar, es_impuesto
-from ezsnack.servicios import armar_recibos, calcular_comisiones
+from ezsnack import cierre, lectores, maquinas, productos
+from web.main import app
 
-CAT = json.loads(Path("config/catalogo.json").read_text(encoding="utf-8"))
-PRODUCTOS = [p["nombre"] for p in CAT["productos"]]
-GRAVABLES = {p["nombre"]: p["gravable"] for p in CAT["productos"]}
-D = Path("datos_prueba")
+D = Path(__file__).resolve().parents[1] / "datos_prueba"
 
 
 @pytest.fixture(scope="module")
-def datos():
-    vendor = leer_vendor_list(D / "vendor_list_PRUEBA.xlsx")
-    ventas = [leer_ventas(D / "nayax_ventas_2026-09_PRUEBA.xlsx", "Nayax"),
-              leer_ventas(D / "ab360_ventas_2026-09_PRUEBA.xlsx", "AB360")]
-    detalle, problemas = consolidar(ventas, vendor, PRODUCTOS)
-    return vendor, ventas, detalle, problemas
+def lecturas():
+    return [lectores.leer(p) for p in sorted(D.glob("reporte_*.xlsx"))]
 
 
-def test_id_maquina():
-    assert extraer_id_maquina("EzSnack 158 - 1823 Haden Rd - Triac Electric") == "158"
-    assert extraer_id_maquina("EzSnack 160 - Crate & Barrel") == "160"
+def test_reconoce_los_cuatro_lectores(lecturas):
+    assert sorted(l.fuente for l in lecturas) == ["AV360", "Nayax", "Qingo", "XMAI"]
+    for l in lecturas:
+        assert l.filas["id_maquina"].notna().all()
 
 
-def test_impuesto_detectado():
-    assert es_impuesto("TFL TAX") and es_impuesto("IVA $") and es_impuesto("Sales Tax")
-    assert not es_impuesto("Doritos Cool Ranch")
+def test_nayax_cuadra_con_su_fila_de_total(lecturas):
+    nayax = next(l for l in lecturas if l.fuente == "Nayax")
+    crudo = pd.read_excel(D / "reporte_nayax_2026-09_EJEMPLO.xlsx", header=1)
+    total = crudo.loc[crudo["Currency"] == "Total", "Settlement Value (Vend Price)"].iloc[0]
+    suma = nayax.filas[["efectivo", "tarjeta", "prepago", "otros"]].sum().sum()
+    assert suma == pytest.approx(total, abs=0.01)
 
 
-def test_emparejar():
-    assert emparejar("DORITOS NCH 1OZ", PRODUCTOS)[0] == "Doritos Nacho Cheese 1 oz"   # alias
-    assert emparejar("Gatorade 20oz Variety", PRODUCTOS)[2] in ("seguro", "dudoso")
-    assert emparejar("Cheetos Crunchy 1 oz", PRODUCTOS)[2] in ("sin_coincidencia", "dudoso")
+def test_vendor_list_ignora_ubicaciones_viejas():
+    m = maquinas.leer(D / "vendor_list_EJEMPLO.xlsx")
+    assert m["id_maquina"].is_unique
+    assert m.set_index("id_maquina").loc["207", "locacion"] == "Warehouse Distribution"
 
 
-def test_consolidado_no_pierde_dinero(datos):
-    _, ventas, detalle, _ = datos
-    assert round(detalle["valor"].sum(), 2) == round(sum(v["valor"].sum() for v in ventas), 2)
+def test_coincidencias_de_la_lista_de_compras():
+    assert productos.coincide("Sunkist 16 oz", "Sunkist Orange 16.9oz") == "seguro"
+    assert productos.coincide("Sunkist 16 oz", "Sunkist-Orange 12 fl. oz.") is None
+    assert productos.coincide("Sunkist 16 oz", "Sunkist") == "dudoso"
+    assert productos.coincide("lance captain wafers", "Lance Captain's Wafers") == "seguro"
+    assert productos.coincide("maruchan", "M&M Peanuts") is None
+    assert productos.coincide("diet dr pepper 16 oz", "12oz - Diet Dr. Pepper") is None
 
 
-def test_alerta_maquina_desconocida(datos):
-    _, _, _, problemas = datos
-    assert "Maquina no esta en el vendor list" in set(problemas["tipo"])
-    assert problemas["texto"].str.contains("999").any()
+def test_agua_exenta():
+    assert productos.es_exento("Ozarka Water 20 oz")
+    assert not productos.es_exento("Vitamin Water - Variety")
+    assert not productos.es_exento("Coconut water")
 
 
-def test_agua_exenta_en_vista_previa(datos):
-    _, _, detalle, _ = datos
-    previa = vista_previa_impuesto(detalle, GRAVABLES, {"Houston": 8.25, "MTA": 8.25})
-    assert set(previa["jurisdiccion"]) == {"Houston", "MTA"}
-    assert (previa["ventas_exentas"] > 0).all()
+def test_cierre_sigue_el_procedimiento(lecturas):
+    integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
+    a = cierre.Ajustes(lista_pagados=productos.leer_lista(D / "compras_impuesto_pagado_EJEMPLO.xlsx"))
+    r = cierre.calcular(integ, a, 2026, 9)
+    p, d = r["pasos"], r["declaracion"]
+    assert p["neto"] == pytest.approx(p["total"] * 0.97, abs=0.01)
+    assert p["gravable"] == pytest.approx(p["neto"] - p["exentas"] - p["pagadas"], abs=0.01)
+    assert d["impuesto_estado"] == pytest.approx(round(d["ventas_gravables"] * 0.0625, 2))
+    assert d["descuento"] == pytest.approx(round(d["impuesto_total"] * 0.005, 2))
+    assert d["vence"] == "2026-10-20"
+    # Smart Water es exenta y esta en la lista de compras: no se descuenta dos veces
+    assert "Smart Water" not in set(r["pagados"].loc[r["pagados"]["marcado"], "producto"])
 
 
-def test_comisiones_solo_maquinas_con_socio(datos):
-    _, _, detalle, _ = datos
-    com = calcular_comisiones(detalle)
-    assert len(com) == 1 and com.iloc[0]["maquinas"] == "116, 136"
-    esperado = detalle[detalle["id_maquina"].isin(["116", "136"])]["valor"].sum() * 0.10
-    assert abs(com.iloc[0]["comision"] - esperado) < 0.01
+def test_comision_procity_respeta_el_minimo(lecturas):
+    integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    for f in r["comisiones"]["detalle"]:
+        if f["socio"] == "ProCity":
+            assert f["aplica"] == (f["ventas"] > 300)
 
 
-def test_recibos_con_direccion_y_codigo_de_impuesto(datos):
-    _, _, detalle, _ = datos
-    resumen = resumen_por_maquina(detalle)
-    items = {n: {"Id": str(i), "Taxable": GRAVABLES[n]} for i, n in enumerate(PRODUCTOS, 1)}
-    recibos = armar_recibos(resumen, items, 2026, 9, "1")
-    assert len(recibos) == 7                         # 7 maquinas del vendor list (la 999 queda por fuera)
-    r = next(x for x in recibos if x["DocNumber"] == "V2609-158")
-    assert r["ShipFromAddr"]["Line1"] == "1823 Haden Rd" and r["TxnDate"] == "2026-09-30"
-    codigos = {l["Description"].split(" - ", 1)[1]: l["SalesItemLineDetail"]["TaxCodeRef"]["value"] for l in r["Line"]}
-    for prod, cod in codigos.items():
-        assert cod == ("TAX" if GRAVABLES[prod] else "NON")
+def test_api_de_ejemplo_y_excel():
+    c = TestClient(app)
+    d = c.post("/api/cierre/ejemplo").json()
+    assert d["declaracion"]["a_pagar"] > 0
+    r = c.post(f"/api/cierre/{d['codigo']}/libro", json={"anio": 2026, "mes": 9})
+    assert r.status_code == 200 and r.content[:2] == b"PK"

@@ -1,52 +1,54 @@
 # EzSnack Impuestos
 
-Prototipo para EzSnack Texas, una empresa de máquinas expendedoras en Houston. Cada mes, el gerente calcula a mano el impuesto a las ventas que le debe al estado de Texas: une los reportes de los lectores de tarjeta de sus máquinas, separa los productos que no pagan impuesto, descuenta lo que compró con impuesto ya pagado y reparte las ventas según la jurisdicción de cada máquina. Este proceso le toma entre tres y cinco días. El prototipo lo reduce a unos pocos pasos sobre el sistema contable que la empresa ya usa, QuickBooks Online.
+Prototipo para EzSnack Texas, una empresa de máquinas expendedoras en Houston. Cada mes el gerente declara y paga el impuesto a las ventas ante el Texas Comptroller. Para hacerlo descarga los reportes de cuatro lectores de tarjeta distintos (Nayax, AV360, XMAI y Qingo), le pide a ChatGPT que los una, revisa duplicados, y en Excel le resta las devoluciones, el agua, que no paga impuesto, y los productos que compró por fuera con el impuesto ya pagado. Después filtra a mano las máquinas de Houston y las de Bellaire, Katy y Spring para calcular los impuestos locales. Este proceso le toma alrededor de una hora cada mes y depende de que ChatGPT sume bien. El prototipo hace todo el cálculo a partir de los mismos archivos y deja un Excel de respaldo para una auditoría del estado.
 
 ## Cómo funciona
 
-La página tiene tres pasos que siguen el orden del cierre del mes.
+La página sigue el orden del cierre del mes y está en español, aunque los reportes de los lectores vienen en inglés.
 
-En el primero se suben la lista de máquinas y los reportes de ventas de cada lector, ya sea Nayax, AB360 u otro. El programa une todas las ventas por máquina y producto, separa el agua, que está exenta, y avisa si encuentra una máquina que no está en la lista o un producto que no reconoce. Cuando el usuario elige a qué producto corresponde un nombre desconocido, el programa lo recuerda para los meses siguientes. Al enviar, se crea en QuickBooks un recibo de venta por máquina con la dirección de esa máquina, y es QuickBooks quien calcula el impuesto del estado, de la ciudad de Houston o del área metropolitana que corresponda.
+En el primer paso se suben el vendor list de la empresa, los reportes de ventas de los lectores y, si se quiere, un Excel con una sola columna llamada Product con lo que se compró ese mes en Walmart u otra tienda pagando impuesto. El programa reconoce cada reporte por sus columnas, sin importar el nombre del archivo. De Nayax toma cada transacción y descarta las rechazadas, que quedan con valor cero, y la fila de total. De AV360, XMAI y Qingo toma una fila por máquina y producto. Las ventas de XMAI y Qingo cuentan como tarjeta, porque esas máquinas no reciben efectivo. Cada venta se asocia a su máquina por el número que aparece en el nombre ("EzSnack 146"), y de la máquina se toma la ciudad y el socio del vendor list. Las filas del vendor list marcadas como old son ubicaciones anteriores y no se usan.
 
-En el segundo se revisan las compras hechas en Walmart, Restaurant Depot o H-E-B, que ya pagaron impuesto en la caja. La foto del recibo se sube en QuickBooks, que la lee, y el programa compara cada renglón con los productos registrados, separa el valor del impuesto pagado y marca lo que no reconoce para que el usuario lo confirme.
+En el segundo paso se confirman los productos exentos y los comprados con impuesto pagado. El programa propone como exenta el agua sin endulzar, es decir, los productos que dicen water o agua, salvo los que llevan azúcar, como Vitamin Water o el agua de coco. La lista de compras se cruza con los productos vendidos. Si un renglón dice el tamaño, por ejemplo Sunkist 16 oz, solo se marcan los productos de ese tamaño, con una onza de tolerancia. Si el nombre vendido no dice el tamaño, queda para que el usuario decida. Un producto que ya es exento no se descuenta dos veces.
 
-En el tercero se calculan las comisiones de quienes le consiguen locaciones a la empresa, a partir de las ventas de sus máquinas, y se registran en QuickBooks como una factura a nombre de cada socio.
+En el tercer paso aparece la declaración en el mismo orden del formulario del Comptroller. Las ventas totales son el efectivo más la tarjeta, menos un tres por ciento de devoluciones a clientes, como hace hoy la empresa. A eso se le restan el agua y los productos ya pagados para llegar a las ventas gravables, sobre las que se calcula el 6.25 % del estado. Para los impuestos locales se hace el mismo cálculo solo con las máquinas de cada jurisdicción: las de Houston van a HOUSTON-CITY (2101017) y las de Bellaire, Katy y Spring a HOUSTON MTA (3101990), las dos al 1 %. Al final se resta el descuento del 0.5 % por presentar a tiempo. Al hacer clic en un valor se copia para pegarlo en la página del Comptroller.
 
-A la derecha, un tiquete parecido al de una máquina resume el mes: ventas, exentas, ventas gravables por jurisdicción, impuesto estimado, impuesto calculado por QuickBooks, impuesto ya pagado en compras y comisiones.
+En el cuarto paso se calculan las comisiones. A ProCity se le paga el 10 % de las ventas de cada máquina que consiguió, solo si esa máquina vendió más de 300 dólares en el mes. A North American University se le paga el 10 % de las ventas netas de sus máquinas, descontando el 5.95 % de lo vendido con tarjeta y 15 dólares al mes por cada lector. VMS y MR aparecen en el vendor list, pero sus reglas no se explicaron, así que quedan por confirmar. Las reglas se pueden cambiar en la página.
 
-## Cómo se conecta con QuickBooks
+En el quinto paso se descarga el Excel del cierre, con las ventas integradas, el resumen por máquina, la declaración, las comisiones y el detalle de qué filas de cada archivo se usaron. Si se conecta QuickBooks, también se registra el cierre como dos tipos de facturas por pagar: una al Texas Comptroller por el impuesto, con vencimiento el 20 del mes siguiente, y una por la comisión de cada socio.
 
-QuickBooks Online no permite instalar módulos por dentro, así que el prototipo funciona como una aplicación externa conectada por la API oficial de Intuit. QuickBooks sigue siendo el sistema contable y el lugar donde se calcula el impuesto oficial. El programa solo hace lo que QuickBooks no hace por sí mismo: unir los reportes de los distintos lectores, reconocer los productos de los recibos y calcular las comisiones.
+## Por qué una aplicación propia y para qué QuickBooks
 
-Cada persona que entra a la página conecta su propia empresa de QuickBooks. Esa conexión queda guardada de forma cifrada en su navegador y no en el servidor, de modo que nadie puede ver ni modificar una empresa que no haya autorizado. Mientras la aplicación use las llaves de desarrollo de Intuit, solo se puede conectar a empresas de prueba, llamadas sandbox. Para conectarla a la empresa real hace falta pasar la revisión de aplicaciones de Intuit, que incluye un cuestionario de seguridad y toma entre una y dos semanas.
+Ningún sistema que ya tiene la empresa hace este cálculo completo. Cada lector calcula un impuesto de referencia solo para sus propias máquinas y con una tasa fija del 6.25 %, sin las tasas locales ni las devoluciones. QuickBooks podría calcular el impuesto por dirección, pero exige registrar cada venta como una transacción y la empresa no usa ese módulo. Además, el gerente piensa cambiarse a Zoho Books porque QuickBooks le resulta costoso. El Comptroller solo recibe los totales. Por eso el prototipo no reemplaza ningún sistema. Se integra con los que ya existen: lee los archivos que exportan los cuatro lectores y el vendor list tal como salen, entrega las cifras en el formato del Comptroller y registra el resultado en el sistema contable por su API.
 
-## Probarla sin archivos propios
+El cálculo no necesita QuickBooks. La conexión es opcional y sirve para que el impuesto por pagar y las comisiones queden en la contabilidad. Hoy se conecta con QuickBooks Online porque es el sistema que la empresa usa. Si la empresa se pasa a Zoho Books, basta con cambiar el archivo ezsnack/contabilidad.py por uno que cree las mismas facturas de proveedor con la API de Zoho, que está disponible en los planes pagos de Zoho Books.
 
-En el primer paso hay un enlace para probar con los datos de ejemplo de septiembre de 2026. Esos archivos están en la carpeta datos_prueba y son ficticios: los nombres de productos salen de las capturas del taller con la empresa, las máquinas 158 y 160 tienen sus direcciones reales y las demás usan edificios públicos de Houston, Bellaire y Katy como dirección de ejemplo. Los nombres de columnas de los reportes también son supuestos, porque en el taller solo se alcanzaron a ver las columnas Machine y Product. Cuando lleguen los reportes reales, basta con ajustar el archivo config/columnas.json, sin cambiar el código.
+## Verificación con septiembre de 2026
 
-La sección Preparar el sandbox deja la empresa de prueba lista la primera vez. Primero quita los datos de ejemplo que trae Intuit, después carga los productos, proveedores y cuentas de EzSnack y, si se quiere, agrega dos compras de prueba para el segundo paso.
+Con los archivos reales de septiembre, el programa cuadra al centavo con el total que cada lector trae en su propio reporte. El Excel que se armó con ChatGPT suma unos dólares menos en efectivo y tarjeta que los reportes originales. Las ventas de las máquinas de Bellaire, Katy y Spring dan igual que en el Excel del gerente.
+
+Las diferencias que quedan vienen de valores que el gerente sacó filtrando a mano: el total de agua, la lista de productos comprados con impuesto pagado ese mes y la lista de máquinas de Houston. Las cifras que pagó en el Comptroller tampoco salen de las fórmulas de su Excel, así que falta que él confirme cuáles fueron los valores de agua, compras y máquinas que usó ese mes. La página muestra esta comparación renglón por renglón cuando se suben los archivos de septiembre y la instalación tiene las cifras de referencia, que se cargan en la variable VERIFICACION_JSON y no están en el repositorio.
+
+Los archivos reales de la empresa no se publican en este repositorio. La carpeta datos_prueba tiene archivos con el mismo formato, pero con máquinas y ventas inventadas, y se generan con scripts/generar_datos_prueba.py.
 
 ## Publicarla en internet
 
-La aplicación está publicada en Render, en https://ezsnack-impuestos.onrender.com, con la instancia más pequeña de pago, que cuesta siete dólares al mes y se cubre con créditos de la cuenta. Así la aplicación siempre está despierta. Si se cambia el plan a free en el archivo render.yaml, queda gratis, pero se duerme después de quince minutos sin uso y tarda cerca de un minuto en despertar con la siguiente visita.
-
-Para publicarla, se entra a render.com con la cuenta de GitHub, se elige crear un Blueprint y se selecciona este repositorio. Render lee el archivo render.yaml y pide tres valores: el Client ID y el Client Secret de la aplicación de Intuit, y la dirección de regreso, que es la dirección que Render le asigna a la aplicación seguida de /auth/callback. Esa misma dirección de regreso se agrega en la configuración de la aplicación en developer.intuit.com, en Settings, Redirect URIs.
+La aplicación está publicada en Render, en https://ezsnack-impuestos.onrender.com. Los archivos que se suben se leen en memoria y se borran a las tres horas, no se guardan en disco. Para publicarla de nuevo se entra a render.com con la cuenta de GitHub, se crea un Blueprint con este repositorio y se completan el Client ID, el Client Secret y la dirección de regreso de la aplicación de Intuit, que es la dirección que asigna Render seguida de /auth/callback. Esa misma dirección se agrega en developer.intuit.com, en Settings, Redirect URIs. Sin esos valores la página funciona igual, solo que sin el registro en QuickBooks.
 
 ## Correrla en un computador
 
-Se necesita Python 3.11 o superior. Dentro de la carpeta del proyecto se copia el archivo .env.example con el nombre .env, se completan sus valores y se ejecuta:
+Se necesita Python 3.11 o superior. Dentro de la carpeta del proyecto se copia el archivo .env.example con el nombre .env, se completan sus valores si se quiere conectar QuickBooks y se ejecuta:
 
 ```
 pip install -r requirements.txt
 uvicorn web.main:app --port 8000
 ```
 
-La página queda en http://localhost:8000. Para que la conexión con QuickBooks funcione en el computador, la dirección http://localhost:8000/auth/callback debe estar registrada en la aplicación de Intuit.
+La página queda en http://localhost:8000.
 
 ## Organización del código
 
-La carpeta ezsnack contiene la lógica: qbo.py maneja la conexión con QuickBooks, consolidar.py une los reportes, emparejar.py reconoce productos por nombre, servicios.py envía ventas, revisa compras y registra comisiones, y preparar.py prepara el sandbox. La carpeta web contiene el servidor, en main.py, y la página, en static. La carpeta config guarda el catálogo de prueba, las columnas de cada reporte, las tarifas de referencia y las equivalencias de nombres aprendidas. Las pruebas automáticas están en tests y se ejecutan con python -m pytest.
+La carpeta ezsnack contiene la lógica. lectores.py reconoce y lee los reportes de cada lector, maquinas.py lee el vendor list, productos.py reconoce el agua y cruza la lista de compras, cierre.py hace el cálculo de la declaración y de las comisiones, libro.py arma el Excel del cierre, contabilidad.py registra el cierre en QuickBooks y qbo.py maneja la conexión con Intuit. Las tasas, las jurisdicciones y las reglas de comisión están en config/reglas.json. La carpeta web tiene el servidor y la página. Las pruebas automáticas están en tests y se ejecutan con python -m pytest.
 
 ## Lo que falta confirmar con la empresa
 
-Falta recibir un reporte real de cada lector para ajustar las columnas, confirmar si los montos de los reportes ya incluyen el impuesto y completar la dirección exacta de cada máquina en la lista. También falta definir sobre qué base se calcula la comisión de cada socio y cada cuánto se paga.
+Falta que el gerente confirme las reglas de comisión de VMS y MR y si el porcentaje de North American University es 10 % o 12 %. También falta definir si los cupones que compran las empresas para sus empleados deben sumarse como ventas, porque hoy no se suman. También conviene revisar con el contador dos puntos. El primero es que la tasa de Houston de 8.25 % incluye el 1 % de la ciudad y el 1 % del MTA, mientras que hoy al MTA solo se le declaran las máquinas de Bellaire, Katy y Spring. El segundo es que lo comprado con impuesto pagado se descuenta por su valor de venta y no por su costo.
