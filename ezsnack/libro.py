@@ -1,8 +1,10 @@
-"""Excel del cierre, con el mismo formato y las mismas formulas del Excel integrado de la empresa.
+"""Excel del cierre.
 
-Hojas: Master Sales_<mes>, Read Me, Payment Summary, Pivot Table, Data y Lists.
-Lo que antes se sacaba filtrando a mano (agua, compras con impuesto pagado, maquinas de Houston
-y del MTA) ahora sale con formulas que leen las listas de la hoja Lists.
+Sigue la estructura del archivo que la empresa arma cada mes, para que el gerente lo reconozca:
+las hojas Master Sales_<mes>, Read Me, Payment Summary, Pivot Table y Data. La diferencia es que
+los valores que antes se sacaban filtrando a mano (agua, compras con impuesto pagado, maquinas de
+Houston y del MTA, cupones) ahora salen con formulas que leen la hoja Lists, asi que al abrirlo se
+ve de donde sale cada numero y se puede cambiar una lista y recalcular.
 """
 from __future__ import annotations
 
