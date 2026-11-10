@@ -63,26 +63,38 @@ def _agencia(qbo: QBO) -> str:
 
 
 def tasas(qbo: QBO) -> dict[str, str]:
-    """Crea (o encuentra) las tres tasas de EzSnack. Devuelve jurisdiccion -> id del tax code."""
+    """Crea (o encuentra) las tres tasas de EzSnack. Devuelve jurisdiccion -> id del tax code.
+
+    QuickBooks no deja repetir el nombre de una tasa, y las tres comparten la del estado. Por eso
+    la del estado se crea una sola vez y las demas la referencian por su id.
+    """
     R = reglas()
     agencia = _agencia(qbo)
-    estado = {"TaxRateName": f"TX estado {R['tasa_estado']:g}%", "RateValue": R["tasa_estado"],
-              "TaxAgencyId": agencia, "TaxApplicableOn": "Sales"}
-    deseadas = {SOLO_ESTADO: [estado]}
-    for nombre, j in R["jurisdicciones"].items():
-        deseadas[nombre] = [estado, {"TaxRateName": f"{j['nombre_comptroller']} {j['tasa']:g}%",
-                                     "RateValue": j["tasa"], "TaxAgencyId": agencia, "TaxApplicableOn": "Sales"}]
+    existentes_rate = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxRate")}
 
-    existentes = {t.get("Name"): t for t in qbo.query("select * from TaxCode")}
+    def detalle(nombre: str, valor: float) -> dict:
+        if nombre in existentes_rate:
+            return {"TaxRateId": existentes_rate[nombre]}
+        return {"TaxRateName": nombre, "RateValue": valor, "TaxAgencyId": agencia, "TaxApplicableOn": "Sales"}
+
+    estado_nombre = f"TX estado {R['tasa_estado']:g}%"
+    deseadas = {SOLO_ESTADO: [(estado_nombre, R["tasa_estado"])]}
+    for nombre, j in R["jurisdicciones"].items():
+        deseadas[nombre] = [(estado_nombre, R["tasa_estado"]),
+                            (f"{j['nombre_comptroller']} {j['tasa']:g}%", j["tasa"])]
+
+    existentes_code = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxCode")}
     codigos = {}
-    for nombre, detalles in deseadas.items():
+    for nombre, partes in deseadas.items():
         etiqueta = f"EzSnack {nombre}"
-        if etiqueta in existentes:
-            codigos[nombre] = existentes[etiqueta]["Id"]
+        if etiqueta in existentes_code:
+            codigos[nombre] = existentes_code[etiqueta]
             continue
-        creado = qbo._peticion("POST", "taxservice/taxcode",
-                               json_body={"TaxCode": etiqueta, "TaxRateDetails": detalles})
+        creado = qbo._peticion("POST", "taxservice/taxcode", json_body={
+            "TaxCode": etiqueta, "TaxRateDetails": [detalle(n, v) for n, v in partes]})
         codigos[nombre] = str(creado.get("TaxCodeId") or creado.get("Id"))
+        # las tasas que acaba de crear ya existen para el siguiente codigo
+        existentes_rate = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxRate")}
     return codigos
 
 
