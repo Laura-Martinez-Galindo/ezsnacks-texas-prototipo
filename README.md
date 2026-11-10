@@ -18,7 +18,7 @@ La regla es usar lo que ya existe y construir solo lo que falta. QuickBooks Onli
 
 Por eso la aplicación no calcula el impuesto oficial. Envía a QuickBooks, por su API, un recibo de venta por máquina con la dirección de la máquina y tres renglones: ventas gravables, agua y productos comprados con impuesto pagado. QuickBooks calcula el impuesto y la página muestra el resultado por jurisdicción. Si el mes se envía dos veces, los recibos se actualizan y no se duplican.
 
-El mantenimiento queda acotado. Las tasas y las reglas de impuestos las mantiene Intuit dentro de QuickBooks. En la aplicación solo hay que ajustar el archivo ezsnack/lectores.py si un lector cambia el formato de su reporte, y config/reglas.json si cambian las ciudades o el porcentaje de devoluciones.
+El mantenimiento queda acotado. Las tasas y las reglas de impuestos las mantiene Intuit dentro de QuickBooks. En la sección Reglas de la página, la persona cambia el porcentaje de devoluciones y las ciudades de cada jurisdicción sin tocar el código. Si un lector cambia su reporte, o llega un reporte de otro sistema, la página reconoce las columnas por su nombre y deja que la persona confirme cuál es la máquina, el producto y el valor vendido.
 
 ## Verificación con septiembre de 2026
 

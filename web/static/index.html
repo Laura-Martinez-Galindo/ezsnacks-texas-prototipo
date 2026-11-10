@@ -29,6 +29,9 @@
       <button class="paso" data-ir="archivos" aria-current="page"><span class="paso-n">1</span><span>Archivos del mes</span></button>
       <button class="paso" data-ir="productos" disabled><span class="paso-n">2</span><span>Exentos y ya pagados</span></button>
       <button class="paso" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
+      <button class="paso paso-ajuste" data-ir="reglas"><span class="paso-n" aria-hidden="true">
+        <svg viewBox="0 0 20 20" width="14" height="14"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm7.4 4.6-1.6.9a6 6 0 0 1-.5 1.2l.5 1.8-1.7 1.7-1.8-.5c-.4.2-.8.4-1.2.5l-.9 1.6h-2.4l-.9-1.6a6 6 0 0 1-1.2-.5l-1.8.5-1.7-1.7.5-1.8a6 6 0 0 1-.5-1.2L2.6 11V8.9l1.6-.9c.1-.4.3-.8.5-1.2l-.5-1.8 1.7-1.7 1.8.5c.4-.2.8-.4 1.2-.5L9.8 1.7h2.4l.9 1.6c.4.1.8.3 1.2.5l1.8-.5 1.7 1.7-.5 1.8c.2.4.4.8.5 1.2l1.6.9z" fill="currentColor"/></svg>
+      </span><span>Reglas</span></button>
     </nav>
 
     <div class="conexion" id="conexion" hidden>
@@ -79,6 +82,11 @@
           <button class="enlace" type="button" id="btn-ejemplo">Probar con archivos de ejemplo</button>
         </div>
       </form>
+
+      <div class="aviso" id="mapeos" hidden>
+        <h3>Reportes de otro formato</h3>
+        <ul class="problemas" id="lista-mapeos"></ul>
+      </div>
 
       <div id="res-archivos" hidden>
         <dl class="cifras" id="cifras-archivos"></dl>
@@ -154,6 +162,28 @@
         <h3>Comparación con el Excel del gerente</h3>
         <div class="tabla-envoltura"><table class="tabla" id="tabla-verif"></table></div>
       </div>
+    </section>
+
+    <!-- Reglas -->
+    <section class="vista" id="vista-reglas" aria-labelledby="h-reglas" hidden>
+      <h2 id="h-reglas">Reglas</h2>
+      <form id="form-config" class="config">
+        <label>Devoluciones a clientes
+          <span class="campo-unidad"><input type="number" id="cfg-devoluciones" min="0" max="50" step="0.1"><span>%</span></span>
+        </label>
+        <label>Ciudades de HOUSTON-CITY
+          <input type="text" id="cfg-houston">
+        </label>
+        <label>Ciudades de HOUSTON MTA
+          <input type="text" id="cfg-mta">
+          <small>Separadas por coma.</small>
+        </label>
+        <div class="carga-acciones">
+          <button class="boton" type="submit">Guardar</button>
+          <button class="enlace" type="button" id="btn-cfg-reset">Volver a las originales</button>
+        </div>
+      </form>
+      <p class="nota-tabla">Las tasas del impuesto no se cambian aquí: las mantiene QuickBooks.</p>
     </section>
   </main>
 

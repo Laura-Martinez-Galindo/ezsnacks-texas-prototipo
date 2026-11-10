@@ -10,7 +10,7 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const estado = {
   anio: null, mes: null, reglas: null, qbo: false, conectado: false,
   codigo: null, ejemplo: false, form: null, res: null,
-  ajustes: { exentos: null, pagados: null }, qbo: null,
+  ajustes: { exentos: null, pagados: null }, qbo: null, mapeos: {}, config: null,
 };
 
 /* ---------- utilidades ---------- */
@@ -30,7 +30,7 @@ async function api(ruta, opciones = {}) {
   }
   let datos = null;
   try { datos = await r.json(); } catch { /* sin cuerpo */ }
-  if (!r.ok) { const e = new Error(datos?.detail || `El servidor respondió ${r.status}.`); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(datos?.detail || `El servidor respondió ${r.status}.`); e.status = r.status; e.datos = datos; throw e; }
   return datos;
 }
 const postJSON = (ruta, cuerpo) => api(ruta, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo ?? {}) });
@@ -108,13 +108,23 @@ $("#btn-salir").addEventListener("click", async () => {
 
 /* ---------- 1. archivos ---------- */
 $$(".ranura input").forEach((inp) => inp.addEventListener("change", () => {
-  const nombres = [...inp.files].map((f) => f.name);
-  inp.closest(".ranura").classList.toggle("lista", nombres.length > 0);
-  inp.closest(".ranura").querySelector(".ranura-archivo").textContent = nombres.join(", ");
+  const archivos = [...inp.files];
+  const ranura = inp.closest(".ranura");
+  ranura.classList.toggle("lista", archivos.length > 0);
+  ranura.querySelector(".ranura-archivo").innerHTML = archivos.length
+    ? `<span class="ranura-cuenta">${archivos.length === 1 ? "1 archivo" : `${archivos.length} archivos`}</span>` +
+      archivos.map((f) => `<span class="ranura-nombre" title="${esc(f.name)}">${esc(f.name)}</span>`).join("")
+    : "";
 }));
 
+/* Reglas que la persona puede cambiar en la pagina; se guardan en su navegador */
+function leerConfig() {
+  try { return JSON.parse(localStorage.getItem("ezsnack_reglas") || "null"); } catch { return null; }
+}
 function ajustes() {
-  return { exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados };
+  const c = estado.config;
+  return { exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados,
+    devoluciones_pct: c ? c.devoluciones_pct : null, ciudades: c ? c.ciudades : null };
 }
 
 async function subir(form) {
@@ -123,6 +133,8 @@ async function subir(form) {
   form.getAll("reportes").forEach((f) => f.size && fd.append("reportes", f));
   const pag = form.get("pagados");
   if (pag && pag.size) fd.append("pagados", pag);
+  fd.append("mapeos", JSON.stringify(estado.mapeos));
+  fd.append("ajustes", JSON.stringify(ajustes()));
   return api(`/api/cierre/archivos?anio=${estado.anio}&mes=${estado.mes}`, { method: "POST", body: fd });
 }
 
@@ -133,12 +145,16 @@ async function empezar(origen) {
     d = await api("/api/cierre/ejemplo", { method: "POST" });
     estado.form = null; estado.ejemplo = true;
     ponerPeriodo(d.anio, d.mes);
+    if (estado.config) d = await postJSON(`/api/cierre/${d.codigo}/calcular`, { anio: d.anio, mes: d.mes, ajustes: ajustes() }).then((x) => ({ ...x, codigo: d.codigo }));
   } else {
-    d = await subir(origen);
     estado.form = origen; estado.ejemplo = false;
+    try { d = await subir(origen); }
+    catch (e) {
+      if (e.status === 422 && e.datos?.sin_leer) { pintarSinLeer(e.datos.sin_leer, e.datos.campos); $("#res-archivos").hidden = true; }
+      throw e;
+    }
   }
   estado.codigo = d.codigo;
-  if (d.errores?.length) d.errores.forEach((e) => avisar(e, true));
   mostrar(d);
   $$(".paso").forEach((p) => (p.disabled = false));
   avisar(`${d.archivos.length} reportes, ${entero(d.maquinas.length)} máquinas.`);
@@ -196,13 +212,14 @@ function pintarArchivos(d) {
     <div><dt>Máquinas</dt><dd>${entero(d.maquinas.length)}</dd></div>
     <div class="${d.revisar.length ? "alerta" : ""}"><dt>Para revisar</dt><dd>${entero(d.revisar.length)}</dd></div>`;
   $("#revisar").hidden = !d.revisar.length;
+  pintarSinLeer(d.sin_leer, d.campos, d.archivos.filter((a) => a.generico));
   $("#lista-revisar").innerHTML = d.revisar.map((r) => `<li><strong>${esc(r.texto)}</strong><span class="detalle">${esc(r.detalle)}</span></li>`).join("");
 
   const A = d.archivos;
   const suma = (k) => A.reduce((a, f) => a + f[k], 0);
   tabla($("#tabla-archivos"), [
     { t: "Archivo", html: (f) => `<span class="archivo">${esc(f.archivo)}</span>${f.periodo ? `<span class="sub">${esc(f.periodo)}</span>` : ""}` },
-    { t: "Lector", v: (f) => f.fuente },
+    { t: "Lector", html: (f) => `${esc(f.fuente)}${f.generico ? `<span class="sub">Formato nuevo, columnas reconocidas</span>` : ""}` },
     { t: "Filas usadas", num: true, html: (f) => {
       const fuera = Object.entries(f.descartadas).filter(([, v]) => v).map(([k, v]) => `${entero(v)} ${DESCARTE[k] || k}`).join(", ");
       return `${entero(f.usadas)}${fuera ? `<span class="sub">${esc(fuera)}</span>` : ""}`;
@@ -212,6 +229,31 @@ function pintarArchivos(d) {
   ], A, ["Total", "", entero(suma("usadas")), dinero(suma("efectivo")), dinero(suma("tarjeta"))]);
   pintarMaquinas();
 }
+
+/* Reportes de otro sistema o formato: la persona confirma que columna es cada campo */
+function pintarSinLeer(sinLeer = [], campos = {}, genericos = []) {
+  const todos = [...sinLeer.map((f) => ({ ...f, falla: true })), ...genericos];
+  $("#mapeos").hidden = !todos.length;
+  $("#lista-mapeos").innerHTML = todos.map((f, i) => `
+    <li class="mapeo" data-archivo="${esc(f.archivo)}">
+      <p><strong>${esc(f.archivo)}</strong> <span class="estado ${f.falla ? "estado-revisar" : "estado-ok"}">${f.falla ? "Falta indicar columnas" : "Reconocido"}</span></p>
+      <div class="mapeo-campos">${Object.entries(campos).map(([k, nombre]) => `
+        <label>${esc(nombre)}<select data-campo="${k}"><option value="">No tiene</option>${
+          f.columnas.map((c) => `<option ${f.mapeo[k] === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>`).join("")}
+      </div>
+      <button class="boton boton-secundario" data-aplicar="${i}">Usar estas columnas</button>
+    </li>`).join("");
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-aplicar]");
+  if (!b) return;
+  const li = b.closest(".mapeo");
+  const m = {};
+  li.querySelectorAll("select").forEach((sel) => { if (sel.value) m[sel.dataset.campo] = sel.value; });
+  if (!m.maquina || !m.producto || !(m.total || m.efectivo || m.tarjeta)) { avisar("Indique la máquina, el producto y un valor vendido.", true); return; }
+  estado.mapeos[li.dataset.archivo] = m;
+  if (estado.form) ocupado(b, () => empezar(estado.form));
+});
 
 function pintarMaquinas() {
   const d = estado.res; if (!d) return;
@@ -296,7 +338,7 @@ function pintarDeclaracion(d) {
     { c: "Ventas gravables", k: "gravable", _clase: "fila-fuerte" },
     { c: "Máquinas de Houston", k: "bruto_Houston" },
     { c: "Houston menos compras con impuesto pagado", k: "base_Houston", _clase: "fila-fuerte" },
-    { c: "Houston MTA (Bellaire, Katy, Spring)", k: "base_Houston MTA", _clase: "fila-fuerte" },
+    { c: `Houston MTA (${d.reglas.jurisdicciones["Houston MTA"].ciudades.join(", ")})`, k: "base_Houston MTA", _clase: "fila-fuerte" },
   ];
   tabla($("#tabla-cascada"), [
     { t: "", v: (f) => f.c },
@@ -394,18 +436,51 @@ function imprimirTiquete(d) {
   linea("Agua", "-" + dinero(p.agua.total), "tq-sub");
   linea("Ya pagadas", "-" + dinero(p.walmart.total), "tq-sub");
   linea("Gravables", dinero(p.gravable.total));
+  c.locales.forEach((l) => linea(l.nombre_comptroller, dinero(l.base), "tq-sub"));
   espacio();
-  linea("Impuesto estimado");
-  linea(`Estado ${pct(c.tasa_estado)}`, dinero(c.impuesto_estado), "tq-sub");
-  c.locales.forEach((l) => linea(`${l.nombre_comptroller} ${pct(l.tasa)}`, dinero(l.impuesto), "tq-sub"));
-  linea("Pago a tiempo", "-" + dinero(c.descuento), "tq-sub");
-  linea("A pagar", dinero(c.a_pagar), "tq-total");
-  if (estado.qbo) { espacio(); linea("Según QuickBooks", dinero(estado.qbo.impuesto), "tq-oficial"); }
+  if (estado.qbo) {
+    const q = estado.qbo.por_jurisdiccion;
+    const estatal = q.filter((x) => /state/i.test(x.jurisdiccion)).reduce((a, x) => a + x.impuesto, 0);
+    linea("Impuesto QuickBooks");
+    linea("Estado 6.25 %", dinero(estatal), "tq-sub");
+    linea("Ciudad, MTA y distritos", dinero(estado.qbo.impuesto - estatal), "tq-sub");
+    linea("Total", dinero(estado.qbo.impuesto), "tq-total");
+  } else {
+    linea("Impuesto 8.25 % en Houston");
+    linea("6.25 estado + 1 ciudad + 1 MTA", "", "tq-sub");
+    linea("Lo calcula QuickBooks", "", "tq-sub");
+  }
   const cuerpo = $("#tq-cuerpo");
   cuerpo.innerHTML = L.map((h, i) => h.replace("<div ", `<div style="--i:${i}" `)).join("");
   cuerpo.classList.remove("imprimiendo"); void cuerpo.offsetWidth; cuerpo.classList.add("imprimiendo");
   $("#tq-pie").textContent = `Un solo pago al Texas Comptroller. Vence el ${new Date(c.vence + "T12:00").toLocaleDateString("es", { day: "numeric", month: "long" })}.`;
 }
+
+/* ---------- reglas editables ---------- */
+function pintarConfig() {
+  const base = estado.reglas;
+  const c = estado.config || { devoluciones_pct: base.devoluciones_pct,
+    ciudades: Object.fromEntries(Object.entries(base.jurisdicciones).map(([k, v]) => [k, v.ciudades])) };
+  $("#cfg-devoluciones").value = c.devoluciones_pct;
+  $("#cfg-houston").value = (c.ciudades.Houston || []).join(", ");
+  $("#cfg-mta").value = (c.ciudades["Houston MTA"] || []).join(", ");
+}
+const lista = (t) => t.split(",").map((x) => x.trim()).filter(Boolean);
+$("#form-config").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  estado.config = { devoluciones_pct: +$("#cfg-devoluciones").value || 0,
+    ciudades: { Houston: lista($("#cfg-houston").value), "Houston MTA": lista($("#cfg-mta").value) } };
+  try { localStorage.setItem("ezsnack_reglas", JSON.stringify(estado.config)); } catch { /* sin almacenamiento */ }
+  avisar("Reglas guardadas.");
+  if (estado.codigo) recalcular();
+});
+$("#btn-cfg-reset").addEventListener("click", () => {
+  estado.config = null;
+  try { localStorage.removeItem("ezsnack_reglas"); } catch { /* sin almacenamiento */ }
+  pintarConfig();
+  avisar("Reglas originales.");
+  if (estado.codigo) recalcular();
+});
 
 /* ---------- inicio ---------- */
 const q = new URLSearchParams(location.search);
@@ -413,4 +488,5 @@ if (q.get("conexion") === "ok") avisar("Conectado a QuickBooks.");
 if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se canceló.", true);
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);
 if (q.has("conexion")) history.replaceState(null, "", "/");
-cargarEstado().catch((e) => avisar(e.message, true));
+estado.config = leerConfig();
+cargarEstado().then(pintarConfig).catch((e) => avisar(e.message, true));

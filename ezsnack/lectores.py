@@ -36,8 +36,27 @@ FIRMAS = {
 }
 
 
+# Para reportes de otros sistemas o formatos nuevos: palabras con las que se reconoce cada campo
+CAMPOS = {
+    "maquina": ["machine name", "machine", "maquina", "máquina", "device name", "device", "kiosk", "location", "asset"],
+    "producto": ["product name", "item name", "product", "item", "producto", "articulo", "artículo", "article", "description", "sku"],
+    "cantidad": ["quantity sold", "sales quantity", "items sold", "quantity", "qty", "cantidad", "units", "vends"],
+    "efectivo": ["cash sales", "cash", "efectivo"],
+    "tarjeta": ["credit sales", "card sales", "cashless", "credit", "card", "tarjeta"],
+    "cupones": ["coupon sales", "coupons", "coupon", "cupones", "cupon"],
+    "total": ["settlement value", "transaction amount", "sales revenue", "sales amount", "total sales", "net sales",
+              "revenue", "amount", "total", "sales", "valor", "monto", "ventas"],
+    "metodo": ["payment method", "payment type", "tender", "metodo de pago", "método de pago", "payment"],
+}
+NOMBRES_CAMPOS = {"maquina": "Máquina", "producto": "Producto", "cantidad": "Cantidad", "efectivo": "Efectivo",
+                  "tarjeta": "Tarjeta", "cupones": "Cupones", "total": "Total vendido", "metodo": "Forma de pago"}
+
+
 class FormatoDesconocido(ValueError):
-    pass
+    def __init__(self, mensaje: str, columnas: list[str] | None = None, mapeo: dict | None = None):
+        super().__init__(mensaje)
+        self.columnas = columnas or []
+        self.mapeo = mapeo or {}
 
 
 @dataclass
@@ -48,6 +67,9 @@ class Lectura:
     leidas: int = 0
     descartadas: dict = field(default_factory=dict)
     periodo: str = ""
+    generico: bool = False                              # leido por reconocimiento de columnas
+    columnas: list = field(default_factory=list)        # columnas del archivo
+    mapeo: dict = field(default_factory=dict)           # campo -> columna usada
 
 
 def id_maquina(nombre) -> str | None:
@@ -94,27 +116,116 @@ def _periodo(crudo: pd.DataFrame, fila_encabezado: int) -> str:
     return f"{fechas[0]} a {fechas[1]}" if len(fechas) >= 2 else ""
 
 
-def leer(fuente, nombre: str | None = None) -> Lectura:
-    """Lee un reporte de cualquier lector reconocido."""
+def _norm(t) -> str:
+    return re.sub(r"[^a-z0-9áéíóúñ$ ]+", " ", str(t).lower()).strip()
+
+
+def proponer_mapeo(columnas: list[str]) -> dict:
+    """Propone que columna corresponde a cada campo, por el parecido del nombre."""
+    puntajes = []
+    for col in columnas:
+        n = _norm(col)
+        if not n or n == "nan":
+            continue
+        for campo, palabras in CAMPOS.items():
+            for i, palabra in enumerate(palabras):
+                if n == palabra:
+                    puntajes.append((300 - i, campo, col))
+                elif re.search(rf"\b{re.escape(palabra)}\b", n):
+                    puntajes.append((200 - i - len(n) / 10, campo, col))
+    mapeo, usadas = {}, set()
+    for _, campo, col in sorted(puntajes, key=lambda x: -x[0]):
+        if campo not in mapeo and col not in usadas:
+            mapeo[campo] = col
+            usadas.add(col)
+    return mapeo
+
+
+def _encabezado_generico(crudo: pd.DataFrame, mapeo: dict | None) -> tuple[int, dict] | None:
+    mejor = None
+    for i in range(min(15, len(crudo))):
+        cols = [re.sub(r"\s+", " ", str(c)).strip() for c in crudo.iloc[i].tolist() if pd.notna(c)]
+        if mapeo:
+            if all(v in cols for v in mapeo.values() if v):
+                return i, mapeo
+            continue
+        m = proponer_mapeo(cols)
+        if "maquina" in m and "producto" in m and (mejor is None or len(m) > len(mejor[1])):
+            mejor = (i, m)
+    return mejor
+
+
+def _generico(df: pd.DataFrame, mapeo: dict, fuente: str) -> Lectura:
+    """Lee un reporte de formato no conocido con las columnas indicadas en el mapeo."""
+    m = {k: v for k, v in mapeo.items() if v and v in df.columns}
+    if "maquina" not in m or "producto" not in m or not ({"total", "efectivo", "tarjeta"} & set(m)):
+        raise FormatoDesconocido("Faltan columnas: máquina, producto y un valor vendido.", list(df.columns), m)
+    leidas = len(df)
+    df, totales = _filas_validas(df, m["maquina"], m["producto"])
+    cero = pd.Series(0.0, index=df.index)
+    total = _num(df[m["total"]]) if "total" in m else None
+    efectivo = _num(df[m["efectivo"]]) if "efectivo" in m else None
+    tarjeta = _num(df[m["tarjeta"]]) if "tarjeta" in m else None
+    cupones = _num(df[m["cupones"]]) if "cupones" in m else cero
+    if efectivo is None and tarjeta is None:
+        if "metodo" in m:  # una fila por venta, con la forma de pago
+            es_efectivo = df[m["metodo"]].astype(str).str.lower().str.contains("cash|efectivo")
+            efectivo, tarjeta = total.where(es_efectivo, 0.0), total.where(~es_efectivo, 0.0)
+        else:              # solo hay un total: se toma como tarjeta
+            efectivo, tarjeta = cero, total
+    elif efectivo is None:
+        efectivo = (total - tarjeta - cupones).clip(lower=0) if total is not None else cero
+    elif tarjeta is None:
+        tarjeta = (total - efectivo - cupones).clip(lower=0) if total is not None else cero
+    cant = _num(df[m["cantidad"]]) if "cantidad" in m else pd.Series(1.0, index=df.index)
+    sin_valor = (efectivo + tarjeta + cupones) <= 0
+    filas = _salida(fuente, df[m["maquina"]][~sin_valor], df[m["producto"]][~sin_valor], cant[~sin_valor],
+                    efectivo=efectivo[~sin_valor], tarjeta=tarjeta[~sin_valor], cupones=cupones[~sin_valor])
+    return Lectura("", fuente, filas, leidas, {"filas de total o vacias": totales, "filas sin valor": int(sin_valor.sum())},
+                   generico=True, columnas=[str(c) for c in df.columns], mapeo=m)
+
+
+def leer(fuente, nombre: str | None = None, mapeo: dict | None = None) -> Lectura:
+    """Lee un reporte. Si no es de un lector conocido, reconoce las columnas por su nombre.
+
+    Con `mapeo` (campo -> columna) se usa ese mapeo en lugar del reconocimiento automatico.
+    """
     nombre = nombre or getattr(fuente, "name", None) or str(fuente)
+    archivo = Path(str(nombre)).name
     if isinstance(fuente, (str, Path)):
         fuente = io.BytesIO(Path(fuente).read_bytes())
-    for crudo in _abrir(fuente, nombre):
-        hallado = _buscar_encabezado(crudo)
-        if not hallado:
-            continue
-        sistema, fila = hallado
-        df = crudo.iloc[fila + 1:].copy()
-        df.columns = crudo.iloc[fila].tolist()
-        df = _limpiar_columnas(df).reset_index(drop=True)
-        lectura = {"Nayax": _nayax, "AV360": _av360, "XMAI": _xmai, "Qingo": _qingo}[sistema](df)
-        lectura.archivo = Path(str(nombre)).name
-        lectura.filas["archivo"] = lectura.archivo
+    hojas = _abrir(fuente, nombre)
+
+    def terminar(lectura: Lectura, crudo, fila) -> Lectura:
+        lectura.archivo = archivo
+        lectura.filas["archivo"] = archivo
         lectura.periodo = _periodo(crudo, fila)
         return lectura
-    raise FormatoDesconocido(
-        f"No se reconoce el formato de {Path(str(nombre)).name}. Se leen los reportes de Nayax "
-        "(Dynamic Transactions Monitor), AV360 (Sales Tax Detail), XMAI (Item Sales) y Qingo (Product sales statistics).")
+
+    def tabla(crudo, fila) -> pd.DataFrame:
+        df = crudo.iloc[fila + 1:].copy()
+        df.columns = crudo.iloc[fila].tolist()
+        return _limpiar_columnas(df).reset_index(drop=True)
+
+    if not mapeo:
+        for crudo in hojas:
+            hallado = _buscar_encabezado(crudo)
+            if hallado:
+                sistema, fila = hallado
+                lector = {"Nayax": _nayax, "AV360": _av360, "XMAI": _xmai, "Qingo": _qingo}[sistema]
+                return terminar(lector(tabla(crudo, fila)), crudo, fila)
+    columnas: list[str] = []
+    for crudo in hojas:
+        hallado = _encabezado_generico(crudo, mapeo)
+        if hallado:
+            fila, m = hallado
+            df = tabla(crudo, fila)
+            df = df.loc[:, [c for c in df.columns if c and c != "nan"]]
+            return terminar(_generico(df, m, Path(archivo).stem[:24]), crudo, fila)
+        if not columnas and len(crudo):
+            columnas = [str(c) for c in crudo.iloc[0].tolist() if pd.notna(c)]
+    raise FormatoDesconocido(f"No se reconocieron las columnas de {archivo}. Indique cuál es cada una.",
+                             columnas, proponer_mapeo(columnas))
 
 
 def _salida(fuente: str, maquina, producto, cantidad, **dinero) -> pd.DataFrame:

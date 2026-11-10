@@ -323,3 +323,26 @@ button, input, select { font: inherit; color: inherit; }
   .socio-cabeza { grid-template-columns: 1fr; }
   .socio-total { text-align: left; }
 }
+
+/* ---------- archivos elegidos ---------- */
+.ranura { min-height: 120px; }
+.ranura.lista { border-style: solid; border-color: var(--linea); border-left: 4px solid var(--hoja); background: var(--papel); }
+.ranura-archivo { display: grid; gap: 2px; margin-top: 10px; min-width: 0; }
+.ranura-archivo:empty { display: block; }
+.ranura-cuenta { font-weight: 600; color: var(--hoja-oscura); font-size: .9rem; }
+.ranura-nombre { font-size: .82rem; color: var(--tenue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ranura.lista .ranura-archivo { color: var(--tenue); }
+
+/* ---------- columnas de reportes nuevos y reglas ---------- */
+.mapeo { gap: 12px; }
+.mapeo-campos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; }
+.mapeo-campos label, .config label { display: grid; gap: 6px; font-size: .9rem; color: var(--tenue); }
+.mapeo-campos select, .config input[type="text"] {
+  background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio-control);
+  padding: 8px 10px; min-height: 40px; width: 100%; min-width: 0; color: var(--tinta);
+}
+.mapeo .boton { justify-self: start; }
+.config { display: grid; gap: 18px; max-width: 520px; margin-top: 20px; }
+.config .campo-unidad { max-width: 160px; }
+.config small { font-size: .82rem; }
+@media (max-width: 760px) { .mapeo-campos { grid-template-columns: 1fr 1fr; } }

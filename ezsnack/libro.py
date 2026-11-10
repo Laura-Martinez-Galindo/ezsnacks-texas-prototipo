@@ -57,7 +57,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         "Water products (exempt)": res["lista_exentos"],
         "Products bought with sales tax paid": res["lista_pagados"],
         "Houston machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston", "maquina"]),
-        "Houston MTA machines (Bellaire, Katy, Spring)": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston MTA", "maquina"]),
+        "Houston MTA machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston MTA", "maquina"]),
     }
 
     # ---------- Master Sales ----------
@@ -77,6 +77,8 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     })
     ws.freeze_panes(1, 0)
 
+    factor = f"{1 - p['devoluciones_pct'] / 100:g}"
+    mta_ciudades = " ".join(res["reglas"]["jurisdicciones"]["Houston MTA"]["ciudades"])
     s = n + 2          # fila de Subtotal (numeracion de Excel)
     t = s + 2          # Total sales
     e, m, w, g, wm, tp, h, hn, mta = t + 1, t + 2, t + 3, t + 4, t + 5, t + 6, t + 7, t + 8, t + 9
@@ -117,7 +119,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
 
     fila(t, "Total sales", "=SUM(MasterSales[Cash Sales])", "=SUM(MasterSales[Credit Sales])", "total", unir=False)
     fila(e, "Equipment Sales", None, None, "equipos", unir=False)
-    fila(m, "Totals minus returns to customer", f"=(F{t}+F{e})*0.97", f"=(G{t}+G{e})*0.97", "neto", verde, verden)
+    fila(m, "Totals minus returns to customer", f"=(F{t}+F{e})*{factor}", f"=(G{t}+G{e})*{factor}", "neto", verde, verden)
     fila(w, "Water Sells", lista("A", "Cash Sales"), lista("A", "Credit Sales"), "agua", unir=False)
     fila(g, "Taxable sells", f"=F{m}-F{w}-F{wm}", f"=G{m}-G{w}-G{wm}", "gravable", amar, amarn, unir=False)
     ws.merge_range(f"I{g}:L{g}", "Removing Sales tax already paid", centro)
@@ -126,7 +128,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     fila(h, "Houston  Taxable sales", lista("C", "Cash Sales"), lista("C", "Credit Sales"), "bruto_Houston")
     fila(hn, "Totals Houston Sales minus taxable minus returns to customer", f"=F{h}-F{wm}", f"=G{h}-G{wm}",
          "base_Houston", verde_i, verden)
-    fila(mta, "Houston MTA (Bellaire Katy Spring)", lista("D", "Cash Sales"), lista("D", "Credit Sales"),
+    fila(mta, f"Houston MTA ({mta_ciudades})", lista("D", "Cash Sales"), lista("D", "Credit Sales"),
          "bruto_Houston MTA", centro)
 
     # ---------- Read Me ----------

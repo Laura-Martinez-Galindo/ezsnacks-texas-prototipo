@@ -35,6 +35,8 @@ class Ajustes:
     exentos: list[str] | None = None   # None = propuesta automatica (agua sin endulzar)
     pagados: list[str] | None = None   # None = coincidencias seguras con la lista de compras
     lista_pagados: list[str] = field(default_factory=list)
+    devoluciones_pct: float | None = None       # None = el de config/reglas.json
+    ciudades: dict[str, list[str]] | None = None  # ciudades de cada jurisdiccion local
 
     @classmethod
     def de(cls, d: dict | None) -> "Ajustes":
@@ -64,9 +66,6 @@ def integrar(lecturas: list[Lectura], maquinas: pd.DataFrame) -> pd.DataFrame:
     for c in ("locacion", "direccion", "ciudad", "estado", "zip"):
         g[c] = g[c].fillna("")
     g["activa"] = g["activa"].fillna(False).astype(bool)
-    j = reglas()["jurisdicciones"]
-    g["jurisdiccion"] = g["ciudad"].map(
-        lambda c: next((k for k, v in j.items() if c.lower() in [x.lower() for x in v["ciudades"]]), ""))
     g["ventas"] = g["efectivo"] + g["tarjeta"]
     orden = pd.to_numeric(g["id_maquina"], errors="coerce")
     return (g.assign(_o=orden).sort_values(["fuente", "_o", "maquina", "producto"], kind="stable")
@@ -75,6 +74,14 @@ def integrar(lecturas: list[Lectura], maquinas: pd.DataFrame) -> pd.DataFrame:
 
 def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     R = reglas()
+    if a.devoluciones_pct is not None:
+        R["devoluciones_pct"] = min(max(float(a.devoluciones_pct), 0.0), 50.0)
+    for nombre, ciudades in (a.ciudades or {}).items():
+        if nombre in R["jurisdicciones"]:
+            R["jurisdicciones"][nombre]["ciudades"] = [str(c).strip() for c in ciudades if str(c).strip()]
+    J = R["jurisdicciones"]
+    integ = integ.assign(jurisdiccion=integ["ciudad"].map(
+        lambda c: next((k for k, v in J.items() if c.lower() in [x.lower() for x in v["ciudades"]]), "")))
     vendidos = (integ.groupby("producto", as_index=False).agg(ventas=("ventas", "sum"), cantidad=("cantidad", "sum"))
                 .sort_values("ventas", ascending=False))
 
@@ -163,4 +170,4 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         revisar.append({"texto": f["buscado"], "detalle": "Está en la lista de compras, pero no tuvo ventas este mes."})
 
     return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "exentos": lista_exentos, "pagados": cruce,
-            "revisar": revisar, "detalle": d, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}
+            "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}

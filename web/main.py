@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ from ezsnack import libro as lib  # noqa: E402
 from ezsnack import maquinas as maq  # noqa: E402
 from ezsnack import productos as prod  # noqa: E402
 from ezsnack import qbo as qbo_mod  # noqa: E402
+from ezsnack import sandbox  # noqa: E402
 
 COOKIE = "ezsnack_qbo"
 _secreto = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
@@ -162,23 +163,23 @@ def _registros(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records", force_ascii=False))
 
 
-def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src) -> dict:
+def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src, mapeos: dict | None = None) -> dict:
     if not reportes:
-        raise HTTPException(400, "Suba al menos un reporte de ventas de algún lector.")
+        raise HTTPException(400, "Suba al menos un reporte de ventas.")
     try:
         lista_maq = maq.leer(*maquinas_src)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    lecturas, errores = [], []
+    lecturas, sin_leer = [], []
     for src, nombre in reportes:
         try:
-            lecturas.append(lec.leer(src, nombre))
+            lecturas.append(lec.leer(src, nombre, (mapeos or {}).get(nombre)))
         except lec.FormatoDesconocido as exc:
-            errores.append(str(exc))
+            sin_leer.append({"archivo": nombre, "error": str(exc), "columnas": exc.columnas, "mapeo": exc.mapeo})
         except Exception as exc:  # noqa: BLE001
-            errores.append(f"No se pudo leer {nombre}: {exc}")
+            sin_leer.append({"archivo": nombre, "error": f"No se pudo leer: {exc}", "columnas": [], "mapeo": {}})
     if not lecturas:
-        raise HTTPException(400, " ".join(errores) or "No se pudo leer ningún reporte.")
+        return {"lecturas": [], "sin_leer": sin_leer}
     lista_pag = []
     if pagados_src:
         try:
@@ -186,7 +187,7 @@ def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src) -> dict:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     return {"lecturas": lecturas, "maquinas": lista_maq, "integ": cie.integrar(lecturas, lista_maq),
-            "lista_pagados": lista_pag, "errores": errores}
+            "lista_pagados": lista_pag, "sin_leer": sin_leer}
 
 
 def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
@@ -197,9 +198,10 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
         "archivos": [{"archivo": l.archivo, "fuente": l.fuente, "periodo": l.periodo, "leidas": l.leidas,
                       "usadas": int(len(l.filas)), "descartadas": l.descartadas,
                       "efectivo": round(float(l.filas["efectivo"].sum()), 2),
-                      "tarjeta": round(float(l.filas["tarjeta"].sum()), 2)}
+                      "tarjeta": round(float(l.filas["tarjeta"].sum()), 2),
+                      "generico": l.generico, "columnas": l.columnas, "mapeo": l.mapeo}
                      for l in c["lecturas"]],
-        "errores": c["errores"],
+        "sin_leer": c["sin_leer"], "campos": lec.NOMBRES_CAMPOS, "reglas": res["reglas"],
         "lista_pagados": c["lista_pagados"],
         "pasos": res["pasos"], "declaracion": res["declaracion"],
         "maquinas": _registros(res["maquinas"][columnas_maq].round(2)),
@@ -223,13 +225,22 @@ async def _archivo(u: UploadFile) -> tuple[io.BytesIO, str]:
 
 @app.post("/api/cierre/archivos")
 async def subir(anio: int, mes: int, maquinas: UploadFile = File(...), reportes: list[UploadFile] = File(...),
-                pagados: UploadFile | None = File(default=None)):
+                pagados: UploadFile | None = File(default=None), mapeos: str = Form(default=""),
+                ajustes: str = Form(default="")):
     reps = [await _archivo(u) for u in reportes if u.filename]
     pag = await _archivo(pagados) if pagados is not None and pagados.filename else None
-    datos = _leer_todo(await _archivo(maquinas), reps, pag)
+    try:
+        mapas = json.loads(mapeos) if mapeos else {}
+        aj = json.loads(ajustes) if ajustes else None
+    except ValueError:
+        mapas, aj = {}, None
+    datos = _leer_todo(await _archivo(maquinas), reps, pag, mapas)
+    if not datos["lecturas"]:
+        return JSONResponse({"detail": "No se pudo leer ningún reporte.", "sin_leer": datos["sin_leer"],
+                             "campos": lec.NOMBRES_CAMPOS}, status_code=422)
     datos["ejemplo"] = False
     codigo = _guardar(datos)
-    return {"codigo": codigo, **_resultado(datos, anio, mes, None)}
+    return {"codigo": codigo, **_resultado(datos, anio, mes, aj)}
 
 
 @app.post("/api/cierre/ejemplo")
@@ -271,6 +282,27 @@ def enviar_quickbooks(request: Request, codigo: str, p: Pedido):
     res = _calcular(_cierre(codigo), p.anio, p.mes, p.ajustes)
     qbo = qbo_mod.QBO(tokens)
     resp = JSONResponse(conta.enviar(qbo, res["maquinas"], p.anio, p.mes))
+    if qbo.renovado:
+        _poner_cookie(resp, qbo.tokens)
+    return resp
+
+
+class Confirmacion(BaseModel):
+    confirmacion: str
+
+
+@app.post("/api/sandbox/limpiar")
+def limpiar_sandbox(request: Request, c: Confirmacion):
+    """Deja la empresa de prueba solo con los datos de EzSnack. No funciona en una empresa real."""
+    if not sandbox.es_sandbox():
+        raise HTTPException(403, "Solo funciona en la empresa de prueba.")
+    if c.confirmacion != "BORRAR":
+        raise HTTPException(400, "Falta la confirmación.")
+    tokens = _leer_tokens(request)
+    if not tokens:
+        raise HTTPException(401, "Conecte QuickBooks primero.")
+    qbo = qbo_mod.QBO(tokens)
+    resp = JSONResponse(sandbox.limpiar(qbo))
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp
