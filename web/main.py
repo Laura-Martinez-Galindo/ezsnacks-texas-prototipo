@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -102,9 +102,19 @@ async def _error_qbo(_, exc):
     return JSONResponse({"detail": f"QuickBooks respondió: {exc}"}, status_code=400)
 
 
+def _pagina() -> str:
+    """index.html con una version en el css y el js, para que el navegador no sirva los viejos."""
+    carpeta = RAIZ / "web" / "static"
+    html = (carpeta / "index.html").read_text(encoding="utf-8")
+    for archivo in ("app.css", "app.js"):
+        version = hashlib.sha256((carpeta / archivo).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{archivo}", f"/static/{archivo}?v={version}")
+    return html
+
+
 @app.get("/")
 def inicio():
-    return FileResponse(RAIZ / "web" / "static" / "index.html")
+    return HTMLResponse(_pagina(), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/auth/conectar")
