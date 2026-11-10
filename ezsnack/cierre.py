@@ -2,11 +2,17 @@
 
 Las formulas son las mismas del Excel integrado que hoy arma el gerente:
 
-    Total sales                       efectivo + tarjeta de todos los lectores
-    Totals minus returns to customer  (Total sales + Equipment Sales) * 0.97
-    Taxable sells                     lo anterior - Water Sells - Walmart buys
-    Houston                           ventas de las maquinas de Houston - Walmart buys
-    Houston MTA                       ventas de las maquinas de Bellaire, Katy y Spring
+    Total sales       efectivo + tarjeta + cupones que compran las empresas
+    menos             cupones que se devuelven a clientes que reclaman
+    Taxable sells     lo anterior - agua - productos comprados con impuesto ya pagado
+    Houston           ventas de las maquinas de Houston - compras con impuesto pagado
+    Houston MTA       ventas de las maquinas de Bellaire, Katy y Spring
+
+Los cupones salen de la columna Coupon de AV360 y son de dos clases. Dos empresas compran
+cupones cada mes para sus empleados: eso es una venta y paga impuesto. El resto son los que la
+empresa manda a quien reclama que la maquina no le entrego el producto: eso es una devolucion y
+se resta. Se separan por el monto del mes: una maquina con mas de cien dolares en cupones los
+vendio a una empresa.
 
 El impuesto no se calcula aqui: lo calcula QuickBooks con su modulo de Sales Tax.
 """
@@ -35,8 +41,9 @@ class Ajustes:
     exentos: list[str] | None = None   # None = propuesta automatica (agua sin endulzar)
     pagados: list[str] | None = None   # None = coincidencias seguras con la lista de compras
     lista_pagados: list[str] = field(default_factory=list)
-    devoluciones_pct: float | None = None       # None = el de config/reglas.json
-    ciudades: dict[str, list[str]] | None = None  # ciudades de cada jurisdiccion local
+    ciudades: dict[str, list[str]] | None = None   # ciudades de cada jurisdiccion local
+    cupones_empresa: list[str] | None = None       # maquinas cuyos cupones compro una empresa
+    cupones_empresa_minimo: float | None = None    # desde cuanto se considera venta a empresa
 
     @classmethod
     def de(cls, d: dict | None) -> "Ajustes":
@@ -74,8 +81,8 @@ def integrar(lecturas: list[Lectura], maquinas: pd.DataFrame) -> pd.DataFrame:
 
 def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     R = reglas()
-    if a.devoluciones_pct is not None:
-        R["devoluciones_pct"] = min(max(float(a.devoluciones_pct), 0.0), 50.0)
+    if a.cupones_empresa_minimo is not None:
+        R["cupones_empresa_minimo"] = max(float(a.cupones_empresa_minimo), 0.0)
     for nombre, ciudades in (a.ciudades or {}).items():
         if nombre in R["jurisdicciones"]:
             R["jurisdicciones"][nombre]["ciudades"] = [str(c).strip() for c in ciudades if str(c).strip()]
@@ -96,22 +103,40 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     d["exento"] = d["producto"].isin(exentos)
     d["impuesto_pagado"] = d["producto"].isin(pagados)
 
+    # Cupones: los que compra una empresa son venta; los demas son devoluciones a clientes
+    por_maquina = d.groupby("id_maquina")["cupones"].sum()
+    if a.cupones_empresa is not None:
+        empresas = {m for m in a.cupones_empresa if m in por_maquina.index}
+    else:
+        empresas = set(por_maquina[por_maquina >= R["cupones_empresa_minimo"]].index)
+    d["cupon_empresa"] = d["id_maquina"].isin(empresas) & (d["cupones"] > 0)
+    cupones = [{"id_maquina": m, "maquina": d.loc[d["id_maquina"] == m, "maquina"].iloc[0],
+                "locacion": d.loc[d["id_maquina"] == m, "locacion"].iloc[0],
+                "valor": round(float(v), 2), "de_empresa": m in empresas}
+               for m, v in por_maquina[por_maquina > 0].sort_values(ascending=False).items()]
+
     def par(mask) -> tuple[float, float]:
         return float(d.loc[mask, "efectivo"].sum()), float(d.loc[mask, "tarjeta"].sum())
 
     todo = pd.Series(True, index=d.index)
-    dev = R["devoluciones_pct"] / 100
+    cup_emp = float(d.loc[d["cupon_empresa"], "cupones"].sum())
+    cup_dev = float(d.loc[~d["cupon_empresa"], "cupones"].sum())
     filas = {}
-    filas["total"] = par(todo)
-    filas["equipos"] = (0.0, 0.0)
-    filas["neto"] = tuple((filas["total"][i] + filas["equipos"][i]) * (1 - dev) for i in (0, 1))
+    filas["ventas"] = par(todo)
+    filas["cupones_empresa"] = (0.0, cup_emp)      # las empresas los pagan con factura, no en efectivo
+    filas["total"] = tuple(filas["ventas"][i] + filas["cupones_empresa"][i] for i in (0, 1))
+    filas["devoluciones"] = (0.0, cup_dev)
+    filas["neto"] = tuple(filas["total"][i] - filas["devoluciones"][i] for i in (0, 1))
     filas["agua"] = par(d["exento"])
     filas["walmart"] = par(d["impuesto_pagado"])
     filas["gravable"] = tuple(filas["neto"][i] - filas["agua"][i] - filas["walmart"][i] for i in (0, 1))
     filas["impuesto_walmart"] = tuple(filas["walmart"][i] * R["tasa_compras"] / 100 for i in (0, 1))
     locales = []
     for nombre, j in R["jurisdicciones"].items():
-        bruto = par(d["jurisdiccion"] == nombre)
+        en_j = d["jurisdiccion"] == nombre
+        bruto = (float(d.loc[en_j, "efectivo"].sum()),
+                 float(d.loc[en_j, "tarjeta"].sum()) + float(d.loc[en_j & d["cupon_empresa"], "cupones"].sum())
+                 - float(d.loc[en_j & ~d["cupon_empresa"], "cupones"].sum()))
         base = tuple(bruto[i] - filas["walmart"][i] for i in (0, 1)) if j.get("resta_compras") else bruto
         filas[f"bruto_{nombre}"], filas[f"base_{nombre}"] = bruto, base
         locales.append({"jurisdiccion": nombre, "codigo": j["codigo"], "nombre_comptroller": j["nombre_comptroller"],
@@ -120,9 +145,8 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
 
     pasos = {k: {"efectivo": round(v[0], 2), "tarjeta": round(v[1], 2), "total": round(v[0] + v[1], 2)}
              for k, v in filas.items()}
-    pasos["devoluciones_pct"] = R["devoluciones_pct"]
-    pasos["cupones"] = round(float(d["cupones"].sum()), 2)
     pasos["prepago"] = round(float(d["prepago"].sum() + d["otros"].sum()), 2)
+    pasos["cupones_minimo"] = R["cupones_empresa_minimo"]
 
     # Estimado con las tasas de la declaracion; el valor oficial lo da QuickBooks
     total_tx, gravable_tx = round(pasos["neto"]["total"]), round(pasos["gravable"]["total"])
@@ -148,11 +172,13 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
               "locacion": x["locacion"].iloc[0], "direccion": x["direccion"].iloc[0], "ciudad": x["ciudad"].iloc[0],
               "estado": x["estado"].iloc[0], "zip": x["zip"].iloc[0], "jurisdiccion": x["jurisdiccion"].iloc[0],
               "en_lista": bool(x["en_lista"].iloc[0]), "activa": bool(x["activa"].iloc[0]),
-              "unidades": float(x["cantidad"].sum()), "ventas": float(x["ventas"].sum()),
+              "unidades": float(x["cantidad"].sum()),
+              "ventas": float(x["ventas"].sum()) + float(x.loc[x["cupon_empresa"], "cupones"].sum())
+                        - float(x.loc[~x["cupon_empresa"], "cupones"].sum()),
               "exentas": float(x.loc[x["exento"], "ventas"].sum()),
               "pagadas": float(x.loc[x["impuesto_pagado"], "ventas"].sum()),
           }), include_groups=False).reset_index())
-    pm["gravable"] = (pm["ventas"] * (1 - dev) - pm["exentas"] - pm["pagadas"]).clip(lower=0)
+    pm["gravable"] = (pm["ventas"] - pm["exentas"] - pm["pagadas"]).clip(lower=0)
     pm = pm.assign(_o=pd.to_numeric(pm["id_maquina"], errors="coerce")).sort_values(["_o", "maquina"]).drop(columns="_o")
 
     lista_exentos = vendidos[vendidos["producto"].isin(set(propuesta) | exentos)].assign(
@@ -169,5 +195,5 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     for _, f in cruce[cruce["estado"] == "sin_ventas"].iterrows():
         revisar.append({"texto": f["buscado"], "detalle": "Está en la lista de compras, pero no tuvo ventas este mes."})
 
-    return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "exentos": lista_exentos, "pagados": cruce,
+    return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "cupones": cupones, "exentos": lista_exentos, "pagados": cruce,
             "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}

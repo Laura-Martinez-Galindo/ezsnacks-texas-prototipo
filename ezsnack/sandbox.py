@@ -12,7 +12,7 @@ from .qbo import QBO
 
 TRANSACCIONES = ["Deposit", "Payment", "BillPayment", "Transfer", "RefundReceipt", "SalesReceipt", "CreditMemo",
                  "Invoice", "Estimate", "VendorCredit", "Purchase", "Bill", "PurchaseOrder", "JournalEntry", "TimeActivity"]
-EMPRESA = {"CompanyName": "EzSnack Texas", "LegalName": "Ez Snack Texas Corp",
+EMPRESA = {"CompanyName": "EzSnack Texas Sandbox", "LegalName": "Ez Snack Texas Corp",
            "CompanyAddr": {"Line1": "4520 W 34th St Ste G", "City": "Houston", "CountrySubDivisionCode": "TX",
                            "PostalCode": "77092", "Country": "US"}}
 

@@ -325,13 +325,12 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 /* ---------- archivos elegidos ---------- */
-.ranura { min-height: 120px; }
-.ranura.lista { border-style: solid; border-color: var(--linea); border-left: 4px solid var(--hoja); background: var(--papel); }
-.ranura-archivo { display: grid; gap: 2px; margin-top: 10px; min-width: 0; }
-.ranura-archivo:empty { display: block; }
-.ranura-cuenta { font-weight: 600; color: var(--hoja-oscura); font-size: .9rem; }
-.ranura-nombre { font-size: .82rem; color: var(--tenue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ranura.lista .ranura-archivo { color: var(--tenue); }
+.ranura { min-height: 118px; }
+.ranura.lista { border-style: solid; border-color: var(--hoja); background: #F6FBF3; }
+.ranura-archivo { display: grid; gap: 3px; margin-top: 10px; min-width: 0; }
+.ranura-archivo:empty::before { content: "Elegir"; text-decoration: underline; text-underline-offset: 3px; color: var(--marino-2); font-size: .9rem; }
+.ranura-cuenta { font-weight: 600; color: var(--hoja-oscura); font-size: .9rem; overflow-wrap: anywhere; }
+.ranura-nombre { font-size: .8rem; color: var(--tenue); line-height: 1.35; overflow-wrap: anywhere; }
 
 /* ---------- columnas de reportes nuevos y reglas ---------- */
 .mapeo { gap: 12px; }
@@ -342,7 +341,15 @@ button, input, select { font: inherit; color: inherit; }
   padding: 8px 10px; min-height: 40px; width: 100%; min-width: 0; color: var(--tinta);
 }
 .mapeo .boton { justify-self: start; }
-.config { display: grid; gap: 18px; max-width: 520px; margin-top: 20px; }
+.config { display: grid; gap: 18px; max-width: 540px; margin-top: 20px; }
 .config .campo-unidad { max-width: 160px; }
 .config small { font-size: .82rem; }
-@media (max-width: 760px) { .mapeo-campos { grid-template-columns: 1fr 1fr; } }
+#tabla-pasos td:first-child { min-width: 230px; }
+#tabla-tecnica td:first-child, #tabla-modulos td:first-child { width: 210px; white-space: nowrap; }
+#tabla-tecnica td:last-child, #tabla-modulos td:last-child { color: var(--tenue); }
+#vista-como h3 { margin-top: 2.4rem; }
+#prog-qbo { max-width: none; margin: 4px 0 18px; }
+@media (max-width: 760px) {
+  .mapeo-campos { grid-template-columns: 1fr 1fr; }
+  #tabla-tecnica td:first-child, #tabla-modulos td:first-child { width: auto; white-space: normal; }
+}

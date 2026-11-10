@@ -56,12 +56,23 @@ def test_cierre_sigue_las_formulas_del_excel(lecturas):
     a = cierre.Ajustes(lista_pagados=productos.leer_lista(D / "compras_impuesto_pagado_EJEMPLO.xlsx"))
     r = cierre.calcular(integ, a, 2026, 9)
     p = r["pasos"]
-    assert p["neto"]["total"] == pytest.approx(p["total"]["total"] * 0.97, abs=0.02)
+    assert p["total"]["total"] == pytest.approx(p["ventas"]["total"] + p["cupones_empresa"]["total"], abs=0.02)
+    assert p["neto"]["total"] == pytest.approx(p["total"]["total"] - p["devoluciones"]["total"], abs=0.02)
     assert p["gravable"]["total"] == pytest.approx(p["neto"]["total"] - p["agua"]["total"] - p["walmart"]["total"], abs=0.02)
     assert p["base_Houston"]["total"] == pytest.approx(p["bruto_Houston"]["total"] - p["walmart"]["total"], abs=0.02)
     assert r["declaracion"]["vence"] == "2026-10-20"
-    # Smart Water es exenta y esta en la lista de compras: no se descuenta dos veces
     assert "Smart Water" not in r["lista_pagados"]
+
+
+def test_cupones_de_empresa_se_separan_de_las_devoluciones(lecturas):
+    """Una maquina con muchos cupones al mes se los vendio a una empresa: es venta, no devolucion."""
+    integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
+    r = cierre.calcular(integ, cierre.Ajustes(cupones_empresa=["208"]), 2026, 9)
+    assert [c["id_maquina"] for c in r["cupones"] if c["de_empresa"]] == ["208"]
+    total = sum(c["valor"] for c in r["cupones"])
+    vendidos = sum(c["valor"] for c in r["cupones"] if c["de_empresa"])
+    assert r["pasos"]["cupones_empresa"]["total"] == pytest.approx(vendidos, abs=0.02)
+    assert r["pasos"]["devoluciones"]["total"] == pytest.approx(total - vendidos, abs=0.02)
 
 
 def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):
@@ -76,7 +87,9 @@ def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):
     assert wb.sheetnames == ["Master Sales_Sept2026", "Read Me", "Payment Summary", "Pivot Table", "Data", "Lists"]
     ws = wb["Master Sales_Sept2026"]
     assert [c.value for c in ws[1]][:3] == ["Source", "Machine", "Product"]
-    assert ws[f"F{ws.max_row - 7}"].value.endswith("*0.97")
+    formulas = [ws.cell(row=f, column=4).value for f in range(ws.max_row - 11, ws.max_row + 1)]
+    assert "Coupons sold to companies" in formulas
+    assert "Returns to customer (coupons)" in formulas
 
 
 def test_api_de_ejemplo_y_excel():

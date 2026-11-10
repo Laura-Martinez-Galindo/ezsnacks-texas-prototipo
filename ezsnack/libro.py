@@ -58,6 +58,8 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         "Products bought with sales tax paid": res["lista_pagados"],
         "Houston machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston", "maquina"]),
         "Houston MTA machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston MTA", "maquina"]),
+        "Coupons sold to companies": sorted({c["maquina"] for c in res["cupones"] if c["de_empresa"]}),
+        "Coupons refunded to customers": sorted({c["maquina"] for c in res["cupones"] if not c["de_empresa"]}),
     }
 
     # ---------- Master Sales ----------
@@ -77,11 +79,11 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     })
     ws.freeze_panes(1, 0)
 
-    factor = f"{1 - p['devoluciones_pct'] / 100:g}"
     mta_ciudades = " ".join(res["reglas"]["jurisdicciones"]["Houston MTA"]["ciudades"])
     s = n + 2          # fila de Subtotal (numeracion de Excel)
-    t = s + 2          # Total sales
-    e, m, w, g, wm, tp, h, hn, mta = t + 1, t + 2, t + 3, t + 4, t + 5, t + 6, t + 7, t + 8, t + 9
+    v = s + 2          # Sales (cash + credit)
+    ce, t, dv, m, w, g, wm, tp, h, hn, mta = (v + 1, v + 2, v + 3, v + 4, v + 5, v + 6,
+                                              v + 7, v + 8, v + 9, v + 10, v + 11)
     ws.write(f"C{s}", "Subtotal")
     ws.write(f"D{s}", " ", sub)
     ws.write(f"E{s}", "Subtotal", sub)
@@ -114,12 +116,16 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         ws.write_formula(f"H{r}", f"=F{r}+G{r}", fmt_n, v["total"])
 
     def lista(col: str, campo: str) -> str:
-        fin = max(len(list(listas.values())["ABCD".index(col)]), 1) + 1
-        return f"=SUMPRODUCT(COUNTIF(Lists!${col}$2:${col}${fin},MasterSales[{'Product' if col in 'AB' else 'Machine'}]),MasterSales[{campo}])"
+        fin = max(len(list(listas.values())["ABCDEF".index(col)]), 1) + 1
+        cual = "Product" if col in "AB" else "Machine"
+        return f"=SUMPRODUCT(COUNTIF(Lists!${col}$2:${col}${fin},MasterSales[{cual}]),MasterSales[{campo}])"
 
-    fila(t, "Total sales", "=SUM(MasterSales[Cash Sales])", "=SUM(MasterSales[Credit Sales])", "total", unir=False)
-    fila(e, "Equipment Sales", None, None, "equipos", unir=False)
-    fila(m, "Totals minus returns to customer", f"=(F{t}+F{e})*{factor}", f"=(G{t}+G{e})*{factor}", "neto", verde, verden)
+    fila(v, "Sales (cash and credit)", "=SUM(MasterSales[Cash Sales])", "=SUM(MasterSales[Credit Sales])",
+         "ventas", unir=False)
+    fila(ce, "Coupons sold to companies", "=0", lista("E", "Coupon Sales"), "cupones_empresa", unir=False)
+    fila(t, "Total sales", f"=F{v}+F{ce}", f"=G{v}+G{ce}", "total", unir=False)
+    fila(dv, "Returns to customer (coupons)", "=0", lista("F", "Coupon Sales"), "devoluciones", unir=False)
+    fila(m, "Total minus returns to customer", f"=F{t}-F{dv}", f"=G{t}-G{dv}", "neto", verde, verden)
     fila(w, "Water Sells", lista("A", "Cash Sales"), lista("A", "Credit Sales"), "agua", unir=False)
     fila(g, "Taxable sells", f"=F{m}-F{w}-F{wm}", f"=G{m}-G{w}-G{wm}", "gravable", amar, amarn, unir=False)
     ws.merge_range(f"I{g}:L{g}", "Removing Sales tax already paid", centro)
@@ -155,7 +161,9 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         ("Payment amounts", "Added credit, cash, coupon, account, prepaid credit and Monyx balance amounts."),
         ("Credit-only systems", "Qingo and XMAI are credit-only, confirmed by EzSnack Texas."),
         ("Nayax coupons", "No payment method explicitly identifies coupons. Prepaid and Monyx amounts are kept separate."),
-        ("Lists", "Water, Walmart buys, Houston and Houston MTA are calculated with formulas from the sheet Lists."),
+        ("Coupons", "Hoerbiger buys coupons every month for its employees: that is a sale. The rest are sent to "
+                    "customers who report a failed vend: that is a return."),
+        ("Lists", "Water, Walmart buys, Houston, Houston MTA and coupons are calculated with formulas from Lists."),
         ("Files", "; ".join(f"{l.fuente}: {l.archivo}" for l in lecturas)),
     ]
     fila_rm += 2

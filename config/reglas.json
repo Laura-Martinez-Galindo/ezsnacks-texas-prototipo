@@ -1,9 +1,9 @@
 {
-  "_nota": "Reglas del cierre mensual de EzSnack Texas, tomadas del Excel integrado del gerente y de la confirmación de pago del Texas Comptroller.",
+  "_nota": "Reglas del cierre mensual de EzSnack Texas. Salen del Excel integrado del gerente y de la reunion del 9 de noviembre de 2026.",
   "tasa_estado": 6.25,
   "tasa_compras": 6.25,
   "descuento_a_tiempo_pct": 0.5,
-  "devoluciones_pct": 3.0,
+  "cupones_empresa_minimo": 100,
   "jurisdicciones": {
     "Houston": {
       "codigo": "2101017",

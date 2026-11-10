@@ -205,6 +205,7 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
         "lista_pagados": c["lista_pagados"],
         "pasos": res["pasos"], "declaracion": res["declaracion"],
         "maquinas": _registros(res["maquinas"][columnas_maq].round(2)),
+        "cupones": res["cupones"],
         "exentos": _registros(res["exentos"].round(2)),
         "pagados": _registros(res["pagados"].round(2)),
         "revisar": res["revisar"],
@@ -271,6 +272,19 @@ def descargar_libro(codigo: str, p: Pedido):
     nombre = f"Integrated_Sales_EzSnack_{lib.MESES[p.mes - 1]}{p.anio}.xlsx"
     return Response(datos, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+@app.get("/api/quickbooks/tasas")
+def ver_tasas(request: Request):
+    """Crea (si faltan) y devuelve las tres tasas propias de EzSnack en QuickBooks."""
+    tokens = _leer_tokens(request)
+    if not tokens:
+        raise HTTPException(401, "Conecte QuickBooks primero.")
+    qbo = qbo_mod.QBO(tokens)
+    resp = JSONResponse({"tasas": conta.tasas(qbo), "empresa": qbo.info_empresa().get("CompanyName")})
+    if qbo.renovado:
+        _poner_cookie(resp, qbo.tokens)
+    return resp
 
 
 @app.post("/api/cierre/{codigo}/quickbooks")
