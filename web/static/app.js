@@ -212,7 +212,7 @@ function mostrar(d) {
   imprimirTiquete(d);
 }
 
-const DESCARTE = { "filas de total o vacias": "sin producto o de total", "transacciones rechazadas (valor 0)": "rechazadas", "filas sin valor": "sin valor" };
+const DESCARTE = { "filas de total o vacias": "filas de totales del reporte, sin venta propia", "transacciones rechazadas (valor 0)": "cobros rechazados por la tarjeta, en $0", "filas sin valor": "filas en $0" };
 function pintarArchivos(d) {
   $("#res-archivos").hidden = false;
   const p = d.pasos;
@@ -232,8 +232,8 @@ function pintarArchivos(d) {
     { t: "Archivo", html: (f) => `<span class="archivo">${esc(f.archivo)}</span>${f.periodo ? `<span class="sub">${esc(f.periodo)}</span>` : ""}` },
     { t: "Lector", html: (f) => `${esc(f.fuente)}${f.generico ? `<span class="sub">Columnas reconocidas</span>` : ""}` },
     { t: "Filas usadas", num: true, html: (f) => {
-      const fuera = Object.entries(f.descartadas).filter(([, v]) => v).map(([k, v]) => `${entero(v)} ${DESCARTE[k] || k}`).join(", ");
-      return `${entero(f.usadas)}${fuera ? `<span class="sub">${esc(fuera)}</span>` : ""}`;
+      const fuera = Object.entries(f.descartadas).filter(([, v]) => v).map(([k, v]) => `${entero(v)} ${DESCARTE[k] || k}`).join("; ");
+      return `${entero(f.usadas)}${fuera ? `<span class="sub">No se contaron ${esc(fuera)}</span>` : ""}`;
     } },
     { t: "Efectivo", num: true, v: (f) => dinero(f.efectivo) },
     { t: "Tarjeta", num: true, v: (f) => dinero(f.tarjeta) },
