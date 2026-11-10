@@ -8,3 +8,4 @@ rapidfuzz>=3.9
 intuit-oauth>=1.2.6
 requests>=2.32
 python-dotenv>=1.0
+XlsxWriter

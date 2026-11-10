@@ -22,7 +22,9 @@ from pathlib import Path
 import pandas as pd
 
 COLUMNAS = ["fuente", "archivo", "maquina", "id_maquina", "producto", "cantidad",
-            "efectivo", "tarjeta", "cupones", "cuenta", "prepago", "otros"]
+            "efectivo", "tarjeta", "cupones", "cuenta", "prepago", "otros",
+            "barcode", "categoria", "costo", "utilidad", "impuesto"]
+EXTRAS = ["barcode", "categoria", "costo", "utilidad", "impuesto"]
 DINERO = ["efectivo", "tarjeta", "cupones", "cuenta", "prepago", "otros"]
 
 # Columnas que identifican cada formato (sin espacios y en minusculas)
@@ -120,9 +122,17 @@ def _salida(fuente: str, maquina, producto, cantidad, **dinero) -> pd.DataFrame:
                         "producto": producto.astype(str).str.strip(), "cantidad": cantidad})
     for c in DINERO:
         out[c] = dinero.get(c, 0.0)
+    for c in EXTRAS:  # datos que solo traen algunos lectores
+        out[c] = dinero.get(c)
     out["id_maquina"] = out["maquina"].map(id_maquina)
     out["archivo"] = ""
     return out[COLUMNAS]
+
+
+def _texto(df: pd.DataFrame, col: str):
+    if col not in df:
+        return None
+    return df[col].map(lambda v: None if pd.isna(v) or not str(v).strip() else str(v).strip())
 
 
 def _filas_validas(df: pd.DataFrame, col_maquina: str, col_producto: str) -> tuple[pd.DataFrame, int]:
@@ -156,7 +166,8 @@ def _av360(df: pd.DataFrame) -> Lectura:
     df, totales = _filas_validas(df, "Machine", "Product")
     filas = _salida("AV360", df["Machine"], df["Product"], _num(df["Quantity Sold"]),
                     efectivo=_num(df["Cash"]), tarjeta=_num(df["Credit"]), cupones=_num(df["Coupon"]),
-                    cuenta=_num(df["Account"]) if "Account" in df else 0.0)
+                    cuenta=_num(df["Account"]) if "Account" in df else 0.0,
+                    impuesto=_num(df["Tax"]) if "Tax" in df else None)
     return Lectura("", "AV360", filas, leidas, {"filas de total o vacias": totales})
 
 
@@ -164,7 +175,10 @@ def _xmai(df: pd.DataFrame) -> Lectura:
     leidas = len(df)
     df, totales = _filas_validas(df, "Machine", "Item Name")
     filas = _salida("XMAI", df["Machine"], df["Item Name"], _num(df["Items Sold"]),
-                    tarjeta=_num(df["Sales revenue"]))  # XMAI solo recibe tarjeta
+                    tarjeta=_num(df["Sales revenue"]),  # XMAI solo recibe tarjeta
+                    barcode=_texto(df, "Barcode"), categoria=_texto(df, "Item Category"),
+                    costo=_num(df["Cost price"]) * _num(df["Items Sold"]) if "Cost price" in df else None,
+                    utilidad=_num(df["Profit"]) if "Profit" in df else None)
     return Lectura("", "XMAI", filas, leidas, {"filas de total o vacias": totales})
 
 
@@ -173,5 +187,8 @@ def _qingo(df: pd.DataFrame) -> Lectura:
     df, totales = _filas_validas(df, "Machine", "Product Name")
     monto = _num(df["Transaction Amount ($)"]) if "Transaction Amount ($)" in df else _num(df["Sales Amount ($)"])
     filas = _salida("Qingo", df["Machine"], df["Product Name"], _num(df["Sales Quantity"]),
-                    tarjeta=monto)  # Qingo solo recibe tarjeta
+                    tarjeta=monto,  # Qingo solo recibe tarjeta
+                    barcode=_texto(df, "Product Barcode"), categoria=_texto(df, "Product Category"),
+                    costo=_num(df["Cost amount ($)"]) if "Cost amount ($)" in df else None,
+                    utilidad=_num(df["Gross profit"]) if "Gross profit" in df else None)
     return Lectura("", "Qingo", filas, leidas, {"filas de total o vacias": totales})

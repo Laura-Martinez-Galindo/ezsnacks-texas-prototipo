@@ -29,8 +29,6 @@
       <button class="paso" data-ir="archivos" aria-current="page"><span class="paso-n">1</span><span>Archivos del mes</span></button>
       <button class="paso" data-ir="productos" disabled><span class="paso-n">2</span><span>Exentos y ya pagados</span></button>
       <button class="paso" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
-      <button class="paso" data-ir="comisiones" disabled><span class="paso-n">4</span><span>Comisiones</span></button>
-      <button class="paso" data-ir="guardar" disabled><span class="paso-n">5</span><span>Guardar y registrar</span></button>
     </nav>
 
     <div class="conexion" id="conexion" hidden>
@@ -57,57 +55,29 @@
     <!-- 1. Archivos -->
     <section class="vista" id="vista-archivos" aria-labelledby="h-archivos">
       <h2 id="h-archivos">Archivos del mes</h2>
-      <p class="guia">Suba el vendor list y los reportes que descarga de cada lector. El programa reconoce solo si cada reporte es de Nayax, AV360, XMAI o Qingo, los une por máquina y producto y hace el mismo cálculo que hoy se hace a mano en Excel.</p>
-
       <form id="form-archivos" class="carga">
         <label class="ranura">
           <input type="file" name="maquinas" accept=".xlsx,.xls,.csv" required>
           <span class="ranura-titulo">Lista de máquinas</span>
-          <span class="ranura-ayuda">El vendor list, con la ciudad y el socio de cada máquina</span>
+          <span class="ranura-ayuda">Vendor list</span>
           <span class="ranura-archivo" data-vacio="Elegir archivo"></span>
         </label>
         <label class="ranura">
           <input type="file" name="reportes" accept=".xlsx,.xls,.csv" multiple required>
           <span class="ranura-titulo">Reportes de ventas</span>
-          <span class="ranura-ayuda">Nayax, AV360, XMAI y Qingo. Puede elegirlos todos a la vez</span>
+          <span class="ranura-ayuda">Nayax, AV360, XMAI y Qingo</span>
           <span class="ranura-archivo" data-vacio="Elegir reportes"></span>
         </label>
         <label class="ranura">
           <input type="file" name="pagados" accept=".xlsx,.xls,.csv">
           <span class="ranura-titulo">Compras con impuesto pagado</span>
-          <span class="ranura-ayuda">Un Excel con la columna Product: lo que se compró ese mes en Walmart u otra tienda</span>
-          <span class="ranura-archivo" data-vacio="Elegir archivo (opcional)"></span>
+          <span class="ranura-ayuda">Excel con la columna Product</span>
+          <span class="ranura-archivo" data-vacio="Elegir archivo"></span>
         </label>
-
-        <details class="ajustes">
-          <summary>Ajustes del cálculo</summary>
-          <div class="ajustes-campos">
-            <label>Devoluciones a clientes
-              <span class="campo-unidad"><input type="number" id="aj-devoluciones" min="0" max="20" step="0.1" value="3"><span>%</span></span>
-              <small>Reembolsos, cupones de reclamos y producto vencido. Hoy se usa un 3 % fijo.</small>
-            </label>
-            <label>Venta de máquinas en efectivo
-              <span class="campo-unidad"><span>$</span><input type="number" id="aj-eq-efectivo" min="0" step="0.01" value="0"></span>
-            </label>
-            <label>Venta de máquinas con tarjeta
-              <span class="campo-unidad"><span>$</span><input type="number" id="aj-eq-tarjeta" min="0" step="0.01" value="0"></span>
-            </label>
-            <label class="marca-check"><input type="checkbox" id="aj-prepago"> Sumar las ventas con saldo prepagado y Monyx de Nayax</label>
-            <label class="marca-check"><input type="checkbox" id="aj-tiempo" checked> Se presenta a tiempo (descuento del 0.5 %)</label>
-          </div>
-        </details>
-
         <div class="carga-acciones">
-          <button class="boton" type="submit" id="btn-calcular">Calcular el cierre</button>
-          <button class="enlace" type="button" id="btn-ejemplo">Probar con los archivos de ejemplo de septiembre</button>
+          <button class="boton" type="submit" id="btn-calcular">Unir ventas</button>
+          <button class="enlace" type="button" id="btn-ejemplo">Probar con archivos de ejemplo</button>
         </div>
-        <p class="nota-ejemplo">Los archivos de ejemplo tienen el mismo formato que los reales, con máquinas y ventas inventadas. Puede descargarlos:
-          <a href="/api/datos-prueba/vendor_list_EJEMPLO.xlsx">vendor list</a>,
-          <a href="/api/datos-prueba/reporte_nayax_2026-09_EJEMPLO.xlsx">Nayax</a>,
-          <a href="/api/datos-prueba/reporte_av360_2026-09_EJEMPLO.xlsx">AV360</a>,
-          <a href="/api/datos-prueba/reporte_xmai_2026-09_EJEMPLO.xlsx">XMAI</a>,
-          <a href="/api/datos-prueba/reporte_qingo_2026-09_EJEMPLO.xlsx">Qingo</a> y
-          <a href="/api/datos-prueba/compras_impuesto_pagado_EJEMPLO.xlsx">compras con impuesto pagado</a>.</p>
       </form>
 
       <div id="res-archivos" hidden>
@@ -121,93 +91,69 @@
         <h3>Ventas por máquina</h3>
         <div class="filtro-maquinas">
           <label for="buscar-maquina" class="oculto">Buscar máquina</label>
-          <input id="buscar-maquina" type="search" placeholder="Buscar por número, nombre o ciudad">
+          <input id="buscar-maquina" type="search" placeholder="Buscar máquina o ciudad">
         </div>
         <div class="tabla-envoltura tabla-alta"><table class="tabla" id="tabla-maquinas"></table></div>
-        <div class="siguiente"><button class="boton" data-ir="productos">Seguir con exentos y ya pagados</button></div>
+        <div class="siguiente"><button class="boton" data-ir="productos">Siguiente</button></div>
       </div>
     </section>
 
     <!-- 2. Productos -->
     <section class="vista" id="vista-productos" aria-labelledby="h-productos" hidden>
       <h2 id="h-productos">Exentos y ya pagados</h2>
-      <p class="guia">Dos grupos de productos no suman a las ventas gravables. Revise las marcas: cada cambio recalcula el cierre.</p>
 
-      <h3>Agua sin endulzar, exenta</h3>
-      <p class="guia">El programa propone los productos que dicen water o agua, menos los que llevan azúcar, como Vitamin Water o el agua de coco.</p>
+      <h3>Agua (exenta)</h3>
       <div class="tabla-envoltura"><table class="tabla" id="tabla-exentos"></table></div>
       <div class="agregar">
-        <label for="otro-exento">Marcar otro producto como exento</label>
-        <input id="otro-exento" list="lista-productos" placeholder="Nombre del producto">
+        <label for="otro-exento" class="oculto">Otro producto exento</label>
+        <input id="otro-exento" list="lista-productos" placeholder="Agregar otro producto exento">
         <button class="boton boton-secundario" id="btn-otro-exento">Agregar</button>
       </div>
 
-      <h3>Comprados por fuera con impuesto pagado</h3>
-      <p class="guia" id="guia-pagados">Cada renglón de su lista se busca entre los productos vendidos. Si la lista dice el tamaño, solo se marcan los de ese tamaño.</p>
+      <h3>Comprados con impuesto pagado</h3>
       <div class="tabla-envoltura"><table class="tabla" id="tabla-pagados"></table></div>
       <div class="agregar">
-        <label for="otro-pagado">Agregar otro producto comprado con impuesto</label>
-        <input id="otro-pagado" list="lista-productos" placeholder="Nombre del producto">
+        <label for="otro-pagado" class="oculto">Otro producto comprado con impuesto</label>
+        <input id="otro-pagado" list="lista-productos" placeholder="Agregar otro producto">
         <button class="boton boton-secundario" id="btn-otro-pagado">Agregar</button>
       </div>
       <datalist id="lista-productos"></datalist>
-      <div class="siguiente"><button class="boton" data-ir="declaracion">Ver la declaración</button></div>
+      <div class="siguiente"><button class="boton" data-ir="declaracion">Siguiente</button></div>
     </section>
 
     <!-- 3. Declaracion -->
     <section class="vista" id="vista-declaracion" aria-labelledby="h-declaracion" hidden>
-      <h2 id="h-declaracion">Declaración del Texas Comptroller</h2>
-      <p class="guia">Los valores están en el mismo orden del formulario de Sales and Use Tax en comptroller.texas.gov. Al hacer clic en un valor se copia para pegarlo en la página.</p>
+      <h2 id="h-declaracion">Declaración</h2>
 
-      <h3>Cómo se llega a las ventas gravables</h3>
-      <div class="tabla-envoltura"><table class="tabla cascada" id="tabla-cascada"></table></div>
-
-      <h3>Location summary</h3>
-      <div class="tabla-envoltura"><table class="tabla" id="tabla-ubicacion"></table></div>
-
-      <h3>List summary</h3>
-      <div class="tabla-envoltura"><table class="tabla" id="tabla-lista"></table></div>
-      <p class="nota-tabla" id="nota-lista"></p>
-
-      <h3>Total</h3>
-      <div class="tabla-envoltura"><table class="tabla" id="tabla-total"></table></div>
-
-      <div id="verificacion" hidden>
-        <h3>Comparación con septiembre de 2026</h3>
-        <p class="guia" id="verif-guia"></p>
-        <div class="tabla-envoltura"><table class="tabla" id="tabla-verif"></table></div>
-      </div>
-      <div class="siguiente"><button class="boton" data-ir="comisiones">Seguir con comisiones</button></div>
-    </section>
-
-    <!-- 4. Comisiones -->
-    <section class="vista" id="vista-comisiones" aria-labelledby="h-comisiones" hidden>
-      <h2 id="h-comisiones">Comisiones</h2>
-      <p class="guia">Cada socio se identifica en el vendor list, en la columna Commision to o por el nombre de la locación. Las reglas se pueden cambiar aquí y el cálculo se actualiza.</p>
-      <div id="lista-socios" class="socios"></div>
-      <div class="siguiente"><button class="boton" data-ir="guardar">Guardar y registrar</button></div>
-    </section>
-
-    <!-- 5. Guardar -->
-    <section class="vista" id="vista-guardar" aria-labelledby="h-guardar" hidden>
-      <h2 id="h-guardar">Guardar y registrar</h2>
-      <p class="guia">El Excel del cierre reemplaza el archivo que hoy se arma con ChatGPT. Trae las ventas integradas, el resumen por máquina, la declaración, las comisiones y los archivos usados, y es el respaldo para una auditoría del estado.</p>
+      <h3>Resumen del mes</h3>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-cascada"></table></div>
       <div class="envio">
-        <div>
-          <h3>Excel del cierre</h3>
-          <p class="guia">Un archivo con el nombre del mes, listo para guardar.</p>
-        </div>
+        <p class="guia">El mismo Excel integrado, con sus fórmulas.</p>
         <button class="boton" id="btn-libro">Descargar Excel</button>
       </div>
 
-      <div class="envio" id="bloque-qbo">
-        <div>
-          <h3>Registrar en QuickBooks</h3>
-          <p class="guia" id="guia-qbo">Crea una factura por pagar al Texas Comptroller por el impuesto, con vencimiento el 20 del mes siguiente, y una por la comisión de cada socio. Si el mes ya se registró, no se duplica.</p>
+      <h3>Valores para el Texas Comptroller</h3>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-comptroller"></table></div>
+      <p class="nota-tabla">Clic en un valor para copiarlo. Estado y locales se pagan juntos, en un solo pago al Comptroller.</p>
+
+      <div id="bloque-qbo">
+        <div class="envio">
+          <div>
+            <h3>Impuesto en QuickBooks</h3>
+            <p class="guia" id="guia-qbo">Envía las ventas por máquina y QuickBooks calcula el impuesto con su módulo de Sales Tax.</p>
+          </div>
+          <button class="boton boton-secundario" id="btn-qbo">Enviar a QuickBooks</button>
         </div>
-        <button class="boton boton-secundario" id="btn-registrar">Registrar el cierre</button>
+        <div id="res-qbo" hidden>
+          <div class="tabla-envoltura"><table class="tabla" id="tabla-qbo"></table></div>
+          <p class="nota-tabla" id="nota-qbo"></p>
+        </div>
       </div>
-      <div class="tabla-envoltura" id="envoltura-registros" hidden><table class="tabla" id="tabla-registros"></table></div>
+
+      <div id="verificacion" hidden>
+        <h3>Comparación con el Excel del gerente</h3>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-verif"></table></div>
+      </div>
     </section>
   </main>
 
@@ -222,7 +168,7 @@
       <div class="tiquete-cuerpo" id="tq-cuerpo">
         <p class="tiquete-vacio">Suba los archivos para ver el resumen del mes.</p>
       </div>
-      <p class="tiquete-pie" id="tq-pie">Valores en dólares. El Comptroller pide las ventas en dólares enteros.</p>
+      <p class="tiquete-pie" id="tq-pie">Un solo pago al Texas Comptroller.</p>
     </div>
   </aside>
 

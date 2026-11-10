@@ -190,30 +190,31 @@ def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src) -> dict:
 
 
 def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
-    a = cie.Ajustes.de(ajustes)
-    a.lista_pagados = c["lista_pagados"]
-    res = cie.calcular(c["integ"], a, anio, mes)
-    columnas_maq = ["id_maquina", "maquina", "fuente", "locacion", "ciudad", "jurisdiccion", "comision_a", "en_lista",
-                    "unidades", "efectivo", "tarjeta", "ventas", "exentas", "pagadas", "gravable"]
+    res = _calcular(c, anio, mes, ajustes)
+    columnas_maq = ["id_maquina", "maquina", "fuente", "locacion", "ciudad", "jurisdiccion", "en_lista",
+                    "unidades", "ventas", "exentas", "pagadas", "gravable"]
     return {
         "archivos": [{"archivo": l.archivo, "fuente": l.fuente, "periodo": l.periodo, "leidas": l.leidas,
                       "usadas": int(len(l.filas)), "descartadas": l.descartadas,
                       "efectivo": round(float(l.filas["efectivo"].sum()), 2),
-                      "tarjeta": round(float(l.filas["tarjeta"].sum()), 2),
-                      "cupones": round(float(l.filas["cupones"].sum()), 2),
-                      "prepago": round(float(l.filas["prepago"].sum() + l.filas["otros"].sum()), 2)}
+                      "tarjeta": round(float(l.filas["tarjeta"].sum()), 2)}
                      for l in c["lecturas"]],
         "errores": c["errores"],
-        "lista_maquinas": int(len(c["maquinas"])),
         "lista_pagados": c["lista_pagados"],
         "pasos": res["pasos"], "declaracion": res["declaracion"],
         "maquinas": _registros(res["maquinas"][columnas_maq].round(2)),
         "exentos": _registros(res["exentos"].round(2)),
         "pagados": _registros(res["pagados"].round(2)),
-        "revisar": res["revisar"], "comisiones": res["comisiones"],
+        "revisar": res["revisar"],
         "productos": sorted(c["integ"]["producto"].dropna().unique().tolist(), key=str.lower),
         "verificacion": VERIFICACION.get(f"{anio}-{mes:02d}") if c.get("ejemplo") is False else None,
     }
+
+
+def _calcular(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
+    a = cie.Ajustes.de(ajustes)
+    a.lista_pagados = c["lista_pagados"]
+    return cie.calcular(c["integ"], a, anio, mes)
 
 
 async def _archivo(u: UploadFile) -> tuple[io.BytesIO, str]:
@@ -255,26 +256,21 @@ def calcular(codigo: str, p: Pedido):
 @app.post("/api/cierre/{codigo}/libro")
 def descargar_libro(codigo: str, p: Pedido):
     c = _cierre(codigo)
-    a = cie.Ajustes.de(p.ajustes)
-    a.lista_pagados = c["lista_pagados"]
-    res = cie.calcular(c["integ"], a, p.anio, p.mes)
-    datos = lib.libro(res, c["lecturas"], p.anio, p.mes)
-    nombre = f"Cierre_impuestos_EzSnack_{p.anio}-{p.mes:02d}.xlsx"
+    datos = lib.libro(_calcular(c, p.anio, p.mes, p.ajustes), c["lecturas"], p.anio, p.mes)
+    nombre = f"Integrated_Sales_EzSnack_{lib.MESES[p.mes - 1]}{p.anio}.xlsx"
     return Response(datos, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
-@app.post("/api/cierre/{codigo}/registrar")
-def registrar(request: Request, codigo: str, p: Pedido):
+@app.post("/api/cierre/{codigo}/quickbooks")
+def enviar_quickbooks(request: Request, codigo: str, p: Pedido):
+    """Envia un recibo de venta por maquina; QuickBooks calcula el impuesto con su modulo de Sales Tax."""
     tokens = _leer_tokens(request)
     if not tokens:
-        raise HTTPException(401, "Conecte QuickBooks para registrar el cierre.")
-    c = _cierre(codigo)
-    a = cie.Ajustes.de(p.ajustes)
-    a.lista_pagados = c["lista_pagados"]
-    res = cie.calcular(c["integ"], a, p.anio, p.mes)
+        raise HTTPException(401, "Conecte QuickBooks primero.")
+    res = _calcular(_cierre(codigo), p.anio, p.mes, p.ajustes)
     qbo = qbo_mod.QBO(tokens)
-    resp = JSONResponse({"registros": conta.registrar(qbo, res, p.anio, p.mes)})
+    resp = JSONResponse(conta.enviar(qbo, res["maquinas"], p.anio, p.mes))
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp

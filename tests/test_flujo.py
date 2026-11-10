@@ -51,31 +51,37 @@ def test_agua_exenta():
     assert not productos.es_exento("Coconut water")
 
 
-def test_cierre_sigue_el_procedimiento(lecturas):
+def test_cierre_sigue_las_formulas_del_excel(lecturas):
     integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
     a = cierre.Ajustes(lista_pagados=productos.leer_lista(D / "compras_impuesto_pagado_EJEMPLO.xlsx"))
     r = cierre.calcular(integ, a, 2026, 9)
-    p, d = r["pasos"], r["declaracion"]
-    assert p["neto"] == pytest.approx(p["total"] * 0.97, abs=0.01)
-    assert p["gravable"] == pytest.approx(p["neto"] - p["exentas"] - p["pagadas"], abs=0.01)
-    assert d["impuesto_estado"] == pytest.approx(round(d["ventas_gravables"] * 0.0625, 2))
-    assert d["descuento"] == pytest.approx(round(d["impuesto_total"] * 0.005, 2))
-    assert d["vence"] == "2026-10-20"
+    p = r["pasos"]
+    assert p["neto"]["total"] == pytest.approx(p["total"]["total"] * 0.97, abs=0.02)
+    assert p["gravable"]["total"] == pytest.approx(p["neto"]["total"] - p["agua"]["total"] - p["walmart"]["total"], abs=0.02)
+    assert p["base_Houston"]["total"] == pytest.approx(p["bruto_Houston"]["total"] - p["walmart"]["total"], abs=0.02)
+    assert r["declaracion"]["vence"] == "2026-10-20"
     # Smart Water es exenta y esta en la lista de compras: no se descuenta dos veces
-    assert "Smart Water" not in set(r["pagados"].loc[r["pagados"]["marcado"], "producto"])
+    assert "Smart Water" not in r["lista_pagados"]
 
 
-def test_comision_procity_respeta_el_minimo(lecturas):
+def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    from ezsnack import libro
     integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
     r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
-    for f in r["comisiones"]["detalle"]:
-        if f["socio"] == "ProCity":
-            assert f["aplica"] == (f["ventas"] > 300)
+    wb = load_workbook(BytesIO(libro.libro(r, lecturas, 2026, 9)))
+    assert wb.sheetnames == ["Master Sales_Sept2026", "Read Me", "Payment Summary", "Pivot Table", "Data", "Lists"]
+    ws = wb["Master Sales_Sept2026"]
+    assert [c.value for c in ws[1]][:3] == ["Source", "Machine", "Product"]
+    assert ws[f"F{ws.max_row - 7}"].value.endswith("*0.97")
 
 
 def test_api_de_ejemplo_y_excel():
     c = TestClient(app)
     d = c.post("/api/cierre/ejemplo").json()
-    assert d["declaracion"]["a_pagar"] > 0
+    assert d["declaracion"]["ventas_gravables"] > 0
     r = c.post(f"/api/cierre/{d['codigo']}/libro", json={"anio": 2026, "mes": 9})
     assert r.status_code == 200 and r.content[:2] == b"PK"
