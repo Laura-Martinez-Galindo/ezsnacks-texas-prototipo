@@ -14,15 +14,27 @@ En el tercero aparece el resumen del mes con las mismas fórmulas del Excel de l
 
 ## Qué hace la aplicación y qué hace QuickBooks
 
-La regla es usar lo que ya existe y construir solo lo que falta. QuickBooks Online, que es el sistema contable de la empresa, ya tiene un módulo de Sales Tax que calcula el impuesto del estado, la ciudad y el MTA según la dirección de cada venta, lleva el impuesto por pagar y registra el pago. Lo que QuickBooks no hace es leer los reportes de los cuatro lectores, unirlos y separar el agua y las compras con impuesto pagado. Eso es lo único que hace esta aplicación.
+La regla es usar lo que ya existe y construir solo lo que falta.
 
-Por eso la aplicación no calcula el impuesto oficial. Envía a QuickBooks, por su API, un recibo de venta por máquina con la dirección de la máquina y tres renglones: ventas gravables, agua y productos comprados con impuesto pagado. QuickBooks calcula el impuesto y la página muestra el resultado por jurisdicción. Si el mes se envía dos veces, los recibos se actualizan y no se duplican.
+QuickBooks Online aporta su módulo de Sales Tax, que calcula el impuesto por la dirección de cada venta y mantiene las tasas al día; los Sales Receipts, donde queda registrada la venta de cada máquina; los Items, con la marca de si el producto paga impuesto; el Customer de las ventas; y el centro de declaraciones, donde la declaración aparece con su fecha de vencimiento y se registra el pago. Nada de eso se programa aquí.
 
-El mantenimiento queda acotado. Las tasas y las reglas de impuestos las mantiene Intuit dentro de QuickBooks. En la sección Reglas de la página, la persona cambia el porcentaje de devoluciones y las ciudades de cada jurisdicción sin tocar el código. Si un lector cambia su reporte, o llega un reporte de otro sistema, la página reconoce las columnas por su nombre y deja que la persona confirme cuál es la máquina, el producto y el valor vendido.
+La aplicación hace lo único que QuickBooks no puede hacer: leer los reportes de los cuatro lectores, unirlos por máquina y producto, separar el agua y los productos comprados por fuera con impuesto pagado, y armar el Excel de respaldo. Después envía a QuickBooks, por su API con OAuth 2, un recibo de venta por máquina con la dirección de esa máquina y tres renglones: ventas gravables, agua y productos ya pagados. Si el mes se envía dos veces, los recibos se actualizan en lugar de duplicarse.
+
+En Houston la tasa es 8.25 %: 6.25 % del estado, 1 % de la ciudad y 1 % del MTA. El 6.25 % que aparece sobre las compras hechas en Walmart o H-E-B es solo de referencia, porque ese impuesto ya se pagó en la caja y lo que hace el cierre es descontar esas ventas de la base gravable.
+
+## Mantenimiento
+
+Las tasas y las reglas de impuestos las mantiene Intuit dentro de QuickBooks, así que no hay tablas de impuestos que actualizar en el código.
+
+En la sección Reglas de la página, la persona cambia el porcentaje de devoluciones y las ciudades de cada jurisdicción local sin tocar el código, y los cambios quedan guardados en su navegador.
+
+Si llega un reporte de otro sistema, o un lector cambia el formato del suyo, la página reconoce las columnas por su nombre, en español o en inglés, y propone cuál es la máquina, el producto, la cantidad y el valor vendido. Si no acierta, la persona elige la columna de cada campo en una lista y vuelve a calcular, sin esperar a que alguien cambie el programa.
 
 ## Verificación con septiembre de 2026
 
-Con los archivos reales de septiembre, el programa cuadra al centavo con el total que cada lector trae en su propio reporte, y las ventas de las máquinas de Bellaire, Katy y Spring dan igual que en el Excel del gerente. Las diferencias que quedan vienen de valores que él sacó filtrando a mano: el agua, los productos comprados con impuesto pagado y la lista de máquinas de Houston.
+Con los archivos reales de septiembre, el programa cuadra al centavo con el total que cada lector trae en su propio reporte. Al enviarlo a QuickBooks, su módulo de Sales Tax reporta exactamente las mismas ventas netas y las mismas ventas gravables que calcula la aplicación, y la declaración aparece en el centro de impuestos con el mismo vencimiento del recibo real.
+
+El impuesto que calcula QuickBooks es mayor que el que declaró la empresa. QuickBooks cobra por la dirección real de cada máquina, así que además de Houston y del MTA aplica las tasas de Stafford, Missouri City, Sugar Land, Tomball y varios distritos de emergencia del condado de Harris, donde también hay máquinas. Esa diferencia hay que revisarla con el contador antes de usar la cifra.
 
 Los archivos reales de la empresa no se publican en este repositorio. La carpeta datos_prueba tiene archivos con el mismo formato, pero con máquinas y ventas inventadas, y se generan con scripts/generar_datos_prueba.py.
 
