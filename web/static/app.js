@@ -11,7 +11,7 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const estado = {
   anio: null, mes: null, reglas: null, qbo: false, conectado: false, empresa: null,
   codigo: null, ejemplo: false, form: null, res: null, envio: null,
-  ajustes: { exentos: null, pagados: null, cupones_empresa: null }, mapeos: {}, config: null,
+  ajustes: { exentos: null, pagados: null, cupones_empresa: null }, mapeos: {}, config: null, formatos: [],
 };
 
 /* ---------- utilidades ---------- */
@@ -129,9 +129,17 @@ $$(".ranura input").forEach((inp) => inp.addEventListener("change", () => {
 function leerConfig() {
   try { return JSON.parse(localStorage.getItem("ezsnack_reglas") || "null"); } catch { return null; }
 }
+function leerFormatos() {
+  try { const f = JSON.parse(localStorage.getItem("ezsnack_formatos") || "[]"); return Array.isArray(f) ? f : []; } catch { return []; }
+}
+function guardarFormatos() {
+  try { localStorage.setItem("ezsnack_formatos", JSON.stringify(estado.formatos)); } catch { /* sin almacenamiento */ }
+  pintarFormatos();
+}
 function ajustes() {
   const c = estado.config;
   return {
+    devoluciones: c && c.devoluciones ? c.devoluciones : null,
     exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados,
     cupones_empresa: estado.ajustes.cupones_empresa,
     cupones_empresa_minimo: c ? c.cupones_empresa_minimo : null,
@@ -146,6 +154,7 @@ async function subir(form) {
   const pag = form.get("pagados");
   if (pag && pag.size) fd.append("pagados", pag);
   fd.append("mapeos", JSON.stringify(estado.mapeos));
+  fd.append("formatos", JSON.stringify(estado.formatos));
   fd.append("ajustes", JSON.stringify(ajustes()));
   return api(`/api/cierre/archivos?anio=${estado.anio}&mes=${estado.mes}`, { method: "POST", body: fd });
 }
@@ -209,6 +218,7 @@ function mostrar(d) {
   pintarArchivos(d);
   pintarProductos(d);
   pintarDeclaracion(d);
+  pintarComparacion(d);
   imprimirTiquete(d);
 }
 
@@ -230,10 +240,11 @@ function pintarArchivos(d) {
   const suma = (k) => A.reduce((a, f) => a + f[k], 0);
   tabla($("#tabla-archivos"), [
     { t: "Archivo", html: (f) => `<span class="archivo">${esc(f.archivo)}</span>${f.periodo ? `<span class="sub">${esc(f.periodo)}</span>` : ""}` },
-    { t: "Lector", html: (f) => `${esc(f.fuente)}${f.generico ? `<span class="sub">Columnas reconocidas</span>` : ""}` },
+    { t: "Lector", html: (f) => `${esc(f.fuente)}${f.generico ? `<span class="sub">Columnas reconocidas</span>` : ""}${f.registrado ? `<span class="sub">Sistema registrado</span>` : ""}` },
     { t: "Filas usadas", num: true, html: (f) => {
       const fuera = Object.entries(f.descartadas).filter(([, v]) => v).map(([k, v]) => `${entero(v)} ${DESCARTE[k] || k}`).join("; ");
-      return `${entero(f.usadas)}${fuera ? `<span class="sub">No se contaron ${esc(fuera)}</span>` : ""}`;
+      const avisos = (f.avisos || []).map((a) => `<span class="sub">${esc(a)}</span>`).join("");
+      return `${entero(f.usadas)}${fuera ? `<span class="sub">No se contaron ${esc(fuera)}</span>` : ""}${avisos}`;
     } },
     { t: "Efectivo", num: true, v: (f) => dinero(f.efectivo) },
     { t: "Tarjeta", num: true, v: (f) => dinero(f.tarjeta) },
@@ -251,18 +262,48 @@ function pintarSinLeer(sinLeer = [], campos = {}, genericos = []) {
         <label>${esc(nombre)}<select data-campo="${k}"><option value="">No tiene</option>${
           f.columnas.map((c) => `<option ${f.mapeo[k] === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>`).join("")}
       </div>
-      <button class="boton boton-secundario" data-aplicar="${i}">Usar estas columnas</button>
+      <div class="mapeo-guardar">
+        <label>Nombre del sistema<input type="text" data-sistema maxlength="24" placeholder="Por ejemplo, Cantaloupe" value="${esc(f.falla ? "" : f.fuente)}"></label>
+        <button class="boton" data-registrar="${i}">Registrar este sistema</button>
+        <button class="boton boton-secundario" data-aplicar="${i}">Usar solo esta vez</button>
+      </div>
     </li>`).join("");
 }
 document.addEventListener("click", (ev) => {
-  const b = ev.target.closest("[data-aplicar]");
+  const b = ev.target.closest("[data-aplicar], [data-registrar]");
   if (!b) return;
   const li = b.closest(".mapeo");
   const m = {};
   li.querySelectorAll("select").forEach((sel) => { if (sel.value) m[sel.dataset.campo] = sel.value; });
   if (!m.maquina || !m.producto || !(m.total || m.efectivo || m.tarjeta)) { avisar("Indique la máquina, el producto y un valor vendido.", true); return; }
-  estado.mapeos[li.dataset.archivo] = m;
+  if (b.dataset.registrar !== undefined) {
+    const nombre = li.querySelector("[data-sistema]").value.trim();
+    if (!nombre) { avisar("Póngale un nombre al sistema, por ejemplo Cantaloupe.", true); return; }
+    estado.formatos = [...estado.formatos.filter((f) => f.nombre.toLowerCase() !== nombre.toLowerCase()), { nombre, mapeo: m }];
+    guardarFormatos();
+    delete estado.mapeos[li.dataset.archivo];
+    avisar(`${nombre} quedó registrado. Sus próximos reportes se reconocen solos.`);
+  } else {
+    estado.mapeos[li.dataset.archivo] = m;
+  }
   if (estado.form) ocupado(b, () => empezar(estado.form));
+});
+function pintarFormatos() {
+  const el = $("#tabla-formatos"); if (!el) return;
+  const campos = { maquina: "Máquina", producto: "Producto", cantidad: "Cantidad", efectivo: "Efectivo", tarjeta: "Tarjeta", cupones: "Cupones", total: "Total vendido", metodo: "Forma de pago" };
+  const propios = ["Nayax", "AV360", "XMAI", "Qingo"].map((n) => ({ nombre: n, fijo: true }));
+  tabla(el, [
+    { t: "Sistema", html: (f) => `<strong>${esc(f.nombre)}</strong>` },
+    { t: "Cómo se reconoce", html: (f) => (f.fijo ? "Viene con la aplicación" : Object.entries(f.mapeo).map(([k, v]) => `${esc(campos[k] || k)}: <em>${esc(v)}</em>`).join(" · ")) },
+    { t: "", html: (f) => (f.fijo ? "" : `<button class="enlace" data-olvidar="${esc(f.nombre)}">Quitar</button>`) },
+  ], [...propios, ...estado.formatos]);
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-olvidar]");
+  if (!b) return;
+  estado.formatos = estado.formatos.filter((f) => f.nombre !== b.dataset.olvidar);
+  guardarFormatos();
+  avisar(`Se quitó ${b.dataset.olvidar}.`);
 });
 
 function pintarMaquinas() {
@@ -306,12 +347,16 @@ function pintarProductos(d) {
   if (!filas.length) $("#tabla-pagados").innerHTML = `<tbody><tr><td>Sin productos. Suba la lista en el paso 1 o agréguelos aquí.</td></tr></tbody>`;
 
   const C = d.cupones;
+  const porPct = d.pasos.devoluciones_metodo === "porcentaje";
+  $("#vista-productos .guia").textContent = porPct
+    ? `Las devoluciones se calculan como el ${pct(d.pasos.devoluciones_pct)} de lo vendido (regla de porcentaje fijo). Los cupones del reporte, ${dinero(d.pasos.cupones_reporte)}, no entran en la cuenta.`
+    : "Los que compra una empresa para sus empleados son venta. Los demás se devolvieron a clientes que reclamaron y se restan.";
   tabla($("#tabla-cupones"), [
-    { t: "Lo compró una empresa", html: (f) => `<input type="checkbox" data-cupon="${esc(f.id_maquina)}" ${f.de_empresa ? "checked" : ""} aria-label="Cupones de empresa: ${esc(f.maquina)}">` },
+    { t: "Lo compró una empresa", html: (f) => `<input type="checkbox" data-cupon="${esc(f.id_maquina)}" ${f.de_empresa ? "checked" : ""} ${porPct ? "disabled" : ""} aria-label="Cupones de empresa: ${esc(f.maquina)}">` },
     { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.locacion || f.maquina)}</span>` },
     { t: "Cupones del mes", num: true, v: (f) => dinero(f.valor) },
-    { t: "Cuenta como", v: (f) => (f.de_empresa ? "Venta" : "Devolución") },
-  ], C, ["", "Venta / devolución", dinero(d.pasos.cupones_empresa.total), dinero(d.pasos.devoluciones.total)]);
+    { t: "Cuenta como", v: (f) => (porPct ? "No se usa" : f.de_empresa ? "Venta" : "Devolución") },
+  ], C, porPct ? ["", "Cupones del reporte", dinero(d.pasos.cupones_reporte), ""] : ["", "Venta / devolución", dinero(d.pasos.cupones_empresa.total), dinero(d.pasos.devoluciones.total)]);
   if (!C.length) $("#tabla-cupones").innerHTML = `<tbody><tr><td>Ningún reporte trae cupones este mes.</td></tr></tbody>`;
 }
 
@@ -341,21 +386,24 @@ $("#btn-otro-pagado").addEventListener("click", () => agregar($("#otro-pagado"),
 /* ---------- 3. declaracion ---------- */
 function pintarDeclaracion(d) {
   const p = d.pasos, c = d.declaracion;
+  const porPct = p.devoluciones_metodo === "porcentaje";
   const filas = [
     { c: "Ventas en efectivo y tarjeta", k: "ventas" },
-    { c: "Cupones que compró una empresa", k: "cupones_empresa" },
-    { c: "Ventas totales", k: "total", _clase: "fila-fuerte" },
-    { c: "Cupones devueltos a clientes", k: "devoluciones" },
+    ...(porPct ? [] : [{ c: "Cupones que compró una empresa", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
+    { c: porPct ? `Devoluciones a clientes, ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes", k: "devoluciones", menos: true },
     { c: "Ventas netas", k: "neto", _clase: "fila-fuerte" },
-    { c: "Agua", k: "agua" },
-    { c: "Comprado con impuesto pagado", k: "walmart" },
+    { c: "Agua", k: "agua", menos: true },
+    { c: "Comprado con impuesto pagado", k: "walmart", menos: true },
     { c: "Ventas gravables", k: "gravable", _clase: "fila-fuerte" },
-    { c: "Máquinas de Houston", k: "bruto_Houston" },
-    { c: "Base de HOUSTON-CITY", k: "base_Houston", _clase: "fila-fuerte" },
-    { c: `Base de HOUSTON MTA (${d.reglas.jurisdicciones["Houston MTA"].ciudades.join(", ")})`, k: "base_Houston MTA", _clase: "fila-fuerte" },
+    ...Object.entries(d.reglas.jurisdicciones).flatMap(([n, j]) => [
+      { c: `Máquinas de ${j.ciudades.join(", ")}: ventas netas`, k: `bruto_${n}` },
+      { c: "Agua de esas máquinas", k: `agua_${n}`, menos: true },
+      { c: "Comprado con impuesto pagado de esas máquinas", k: `pagadas_${n}`, menos: true },
+      { c: `Base de ${j.nombre_comptroller}`, k: `base_${n}`, _clase: "fila-fuerte" },
+    ]),
   ];
   tabla($("#tabla-cascada"), [
-    { t: "", v: (f) => f.c },
+    { t: "", v: (f) => (f.menos ? "menos " : "") + f.c },
     { t: "Efectivo", num: true, v: (f) => dinero(p[f.k].efectivo) },
     { t: "Tarjeta", num: true, v: (f) => dinero(p[f.k].tarjeta) },
     { t: "Total", num: true, v: (f) => dinero(p[f.k].total) },
@@ -372,32 +420,38 @@ function pintarDeclaracion(d) {
     ...c.locales.map((l) => ({ c: l.nombre_comptroller, s: `${l.codigo} · ${l.maquinas} máquinas`, v: l.base, t: pct(l.tasa) })),
   ]);
   pintarEnvio();
-  pintarVerificacion(d);
 }
 
-function pintarVerificacion(d) {
-  const v = d.verificacion;
-  $("#verificacion").hidden = !v;
-  if (!v) return;
-  const p = d.pasos, ex = v.excel, co = v.comptroller;
-  const fila = (concepto, prog, excel, comp) => ({ concepto, prog, excel, comp, dif: excel == null ? null : prog - excel });
-  tabla($("#tabla-verif"), [
-    { t: "", v: (f) => f.concepto },
-    { t: "Este programa", num: true, v: (f) => dinero(f.prog) },
-    { t: "Excel", num: true, v: (f) => (f.excel == null ? "" : dinero(f.excel)) },
-    { t: "Diferencia", num: true, html: (f) => (f.dif == null ? "" : `<span class="${Math.abs(f.dif) < 0.01 ? "igual" : "distinto"}">${Math.abs(f.dif) < 0.01 ? "igual" : (f.dif > 0 ? "+" : "−") + dinero(Math.abs(f.dif))}</span>`) },
-    { t: "Declarado", num: true, v: (f) => (f.comp == null ? "" : dinero(f.comp)) },
-  ], [
-    fila("Ventas en efectivo y tarjeta", p.ventas.total, ex.total, null),
-    fila("Ventas netas", p.neto.total, ex.neto, co.total_ventas),
-    fila("Agua", p.agua.total, ex.exentas, null),
-    fila("Comprado con impuesto pagado", p.walmart.total, ex.pagadas, null),
-    fila("Ventas gravables", p.gravable.total, ex.gravable, co.ventas_gravables),
-    fila("Máquinas de Houston", p.bruto_Houston.total, ex.houston_bruto, null),
-    fila("Base de HOUSTON-CITY", p.base_Houston.total, ex.houston, co.houston),
-    fila("Base de HOUSTON MTA", p["base_Houston MTA"].total, ex.mta_bruto, co.mta),
-  ]);
+function pintarComparacion(d) {
+  const c = d.comparacion;
+  $("#res-comparar").hidden = !c;
+  $("#btn-comparar").textContent = c ? "Cambiar Excel" : "Elegir Excel";
+  if (!c) return;
+  const v = d.verificacion?.comptroller;
+  const declarado = v ? { "Ventas netas": v.total_ventas, "Ventas gravables": v.ventas_gravables, "Base de HOUSTON-CITY": v.houston, "Base de HOUSTON MTA": v.mta } : {};
+  const cols = [
+    { t: "", html: (f) => `<strong>${esc(f.concepto)}</strong>${f.causas.map((x) => `<span class="sub">${esc(x)}</span>`).join("")}` },
+    { t: "Excel a mano", num: true, v: (f) => (f.original == null ? "" : dinero(f.original)) },
+    { t: "Aplicación", num: true, v: (f) => dinero(f.app) },
+    { t: "Diferencia", num: true, html: (f) => (f.dif == null ? "" : `<span class="${Math.abs(f.dif) < 0.005 ? "igual" : "distinto"}">${Math.abs(f.dif) < 0.005 ? "igual" : (f.dif > 0 ? "+" : "−") + dinero(Math.abs(f.dif))}</span>`) },
+  ];
+  if (v) cols.push({ t: "Declarado", num: true, v: (f) => (declarado[f.concepto] == null ? "" : dinero(declarado[f.concepto])) });
+  tabla($("#tabla-comparar"), cols, c.filas);
+  $("#nota-comparar").textContent = `${c.archivo}: ${c.iguales} de ${c.total} renglones iguales. Debajo de cada renglón distinto está la causa que se encontró en los datos.`;
 }
+$("#archivo-original").addEventListener("change", (ev) => {
+  const archivo = ev.target.files[0];
+  if (!archivo) return;
+  if (!estado.codigo) { avisar("Primero suba los reportes del mes.", true); ev.target.value = ""; return; }
+  ocupado($("#btn-comparar"), async () => {
+    const fd = new FormData();
+    fd.append("original", archivo);
+    fd.append("ajustes", JSON.stringify(ajustes()));
+    const d = await api(`/api/cierre/${estado.codigo}/comparar?anio=${estado.anio}&mes=${estado.mes}`, { method: "POST", body: fd });
+    mostrar(d);
+    avisar(`Comparado con ${archivo.name}.`);
+  }).finally(() => { ev.target.value = ""; });
+});
 
 /* ---------- Excel ---------- */
 $("#btn-libro").addEventListener("click", () => ocupado($("#btn-libro"), async () => {
@@ -443,14 +497,30 @@ function pintarEnvio() {
   $("#res-qbo").hidden = !r;
   $("#btn-qbo").disabled = !estado.conectado;
   if (!r) return;
-  tabla($("#tabla-qbo"), [
-    { t: "Tasa", v: (f) => f.jurisdiccion },
-    { t: "Porcentaje", num: true, v: (f) => pct(f.tasa) },
-    { t: "Taxable sales", num: true, v: (f) => dinero(f.base) },
-    { t: "Impuesto", num: true, v: (f) => dinero(f.impuesto) },
-  ], r.por_jurisdiccion, ["Total según QuickBooks", "", "", dinero(r.impuesto)]);
+  const marca = (ok) => `<span class="${ok ? "igual" : "distinto"}">${ok ? "igual" : "distinto"}</span>`;
+  if (r.cuadre?.length) {
+    tabla($("#tabla-qbo"), [
+      { t: "Tasa", v: (f) => f.jurisdiccion },
+      { t: "Porcentaje", num: true, v: (f) => pct(f.tasa) },
+      { t: "Base en la aplicación", num: true, v: (f) => dinero(f.base_app) },
+      { t: "Base en QuickBooks", num: true, v: (f) => dinero(f.base_qbo) },
+      { t: "Impuesto en la aplicación", num: true, v: (f) => dinero(f.impuesto_app) },
+      { t: "Impuesto en QuickBooks", num: true, v: (f) => dinero(f.impuesto_qbo) },
+      { t: "", html: (f) => marca(f.igual) },
+    ], r.cuadre, ["Total", "", "", "", dinero(r.cuadre.reduce((a, f) => a + f.impuesto_app, 0)), dinero(r.impuesto), ""]);
+  } else {
+    tabla($("#tabla-qbo"), [
+      { t: "Tasa", v: (f) => f.jurisdiccion },
+      { t: "Porcentaje", num: true, v: (f) => pct(f.tasa) },
+      { t: "Taxable sales", num: true, v: (f) => dinero(f.base) },
+      { t: "Impuesto", num: true, v: (f) => dinero(f.impuesto) },
+    ], r.por_jurisdiccion, ["Total según QuickBooks", "", "", dinero(r.impuesto)]);
+  }
+  const c = estado.res?.declaracion;
+  const comp = c ? ` El Comptroller redondea las bases a dólares enteros y calcula ${dinero(c.impuesto_total)}; la diferencia de centavos con QuickBooks es ese redondeo.` : "";
   $("#nota-qbo").textContent = `${r.creados} recibos creados y ${r.actualizados} actualizados. `
-    + `QuickBooks recibió ${dinero(r.gravable)} como taxable sales y ${dinero(r.exento)} como nontaxable sales.`;
+    + (r.cuadre?.length ? (r.cuadra ? "QuickBooks devolvió las mismas bases y el mismo impuesto que calculó la aplicación." : "Hay diferencias entre QuickBooks y la aplicación: revise las filas marcadas.") : "")
+    + ` QuickBooks recibió ${dinero(r.gravable)} como taxable sales y ${dinero(r.exento)} como nontaxable sales.` + comp;
 }
 
 /* ---------- tiquete ---------- */
@@ -489,18 +559,29 @@ function imprimirTiquete(d) {
 /* ---------- reglas ---------- */
 function pintarConfig() {
   const base = estado.reglas;
-  const c = estado.config || {
+  const c = { devoluciones: base.devoluciones, ...(estado.config || {
     cupones_empresa_minimo: base.cupones_empresa_minimo,
     ciudades: Object.fromEntries(Object.entries(base.jurisdicciones).map(([k, v]) => [k, v.ciudades])),
-  };
+  }) };
+  c.devoluciones = c.devoluciones || base.devoluciones;
+  $("#cfg-dev").value = c.devoluciones.metodo;
+  $("#cfg-pct").value = c.devoluciones.porcentaje;
+  verCamposDev();
   $("#cfg-houston").value = (c.ciudades.Houston || []).join(", ");
   $("#cfg-mta").value = (c.ciudades["Houston MTA"] || []).join(", ");
   $("#cfg-cupones").value = c.cupones_empresa_minimo;
 }
+function verCamposDev() {
+  const porPct = $("#cfg-dev").value === "porcentaje";
+  $("#cfg-pct-campo").hidden = !porPct;
+  $("#cfg-cupones-campo").hidden = porPct;
+}
+$("#cfg-dev").addEventListener("change", verCamposDev);
 const lista = (t) => t.split(",").map((x) => x.trim()).filter(Boolean);
 $("#form-config").addEventListener("submit", (ev) => {
   ev.preventDefault();
   estado.config = {
+    devoluciones: { metodo: $("#cfg-dev").value, porcentaje: +$("#cfg-pct").value || 0 },
     cupones_empresa_minimo: +$("#cfg-cupones").value || 0,
     ciudades: { Houston: lista($("#cfg-houston").value), "Houston MTA": lista($("#cfg-mta").value) },
   };
@@ -534,7 +615,8 @@ function pintarComo() {
     { p: "Revisar duplicados y nombres distintos", antes: "El gerente, a ojo", quien: "La aplicación", c: "estado-ok" },
     { p: "Separar el agua", antes: "Filtro en Excel", quien: "La aplicación", c: "estado-ok" },
     { p: "Separar lo comprado con impuesto pagado", antes: "Filtro en Excel", quien: "La aplicación", c: "estado-ok" },
-    { p: "Separar cupones de venta y de devolución", antes: "Estimado del 3 %", quien: "La aplicación", c: "estado-ok" },
+    { p: "Restar las devoluciones a clientes", antes: "3 % fijo en una fórmula", quien: "La aplicación, con los cupones o con el porcentaje", c: "estado-ok" },
+    { p: "Comprobar que QuickBooks dio lo mismo", antes: "No se hacía", quien: "La aplicación", c: "estado-ok" },
     { p: "Cruzar las máquinas de Houston y del MTA", antes: "Dos pantallas en paralelo", quien: "La aplicación", c: "estado-ok" },
     { p: "Calcular el impuesto", antes: "Tasa fija en Excel", quien: "QuickBooks", c: "estado-impuesto" },
     { p: "Guardar el respaldo para una auditoría", antes: "Excel a mano", quien: "La aplicación", c: "estado-ok" },
@@ -588,12 +670,16 @@ function pintarComo() {
 
 /* ---------- inicio ---------- */
 const q = new URLSearchParams(location.search);
-if (q.get("conexion") === "ok") avisar("Conectado a QuickBooks.");
+if (q.get("conexion") === "ok") avisar(q.get("reglas") === "ok"
+  ? "Conectado. QuickBooks quedó con las tasas, los productos y el cliente de EzSnack."
+  : "Conectado a QuickBooks.");
 if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se canceló.", true);
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);
 if (q.has("conexion")) history.replaceState(null, "", "/");
 estado.config = leerConfig();
+estado.formatos = leerFormatos();
 cargarEstado().then(() => {
   pintarConfig();
+  pintarFormatos();
   if (estado.conectado) api("/api/quickbooks/tasas").then((d) => { estado.tasas = d.tasas; pintarComo(); }).catch(() => {});
 }).catch((e) => avisar(e.message, true));

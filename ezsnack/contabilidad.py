@@ -62,40 +62,63 @@ def _agencia(qbo: QBO) -> str:
     return qbo.crear("TaxAgency", {"DisplayName": AGENCIA})["Id"]
 
 
-def tasas(qbo: QBO) -> dict[str, str]:
+def _deseadas(R: dict) -> dict[str, list[tuple[str, float]]]:
+    """jurisdiccion -> [(nombre de la tasa, porcentaje)], segun las reglas de la aplicacion."""
+    estado_nombre = f"TX estado {R['tasa_estado']:g}%"
+    deseadas = {SOLO_ESTADO: [(estado_nombre, float(R["tasa_estado"]))]}
+    for nombre, j in R["jurisdicciones"].items():
+        deseadas[nombre] = [(estado_nombre, float(R["tasa_estado"])),
+                            (f"{j['nombre_comptroller']} {j['tasa']:g}%", float(j["tasa"]))]
+    return deseadas
+
+
+def tasas(qbo: QBO, detalle: bool = False):
     """Crea (o encuentra) las tres tasas de EzSnack. Devuelve jurisdiccion -> id del tax code.
 
     QuickBooks no deja repetir el nombre de una tasa, y las tres comparten la del estado. Por eso
     la del estado se crea una sola vez y las demas la referencian por su id.
+
+    Si en las reglas cambia un porcentaje, el codigo que ya existe en QuickBooks queda con la tasa
+    vieja (QuickBooks no deja editarla por la API). En ese caso se crea un codigo nuevo, con el
+    porcentaje en el nombre, y los recibos pasan a usar ese.
     """
     R = reglas()
     agencia = _agencia(qbo)
-    existentes_rate = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxRate")}
+    rates = qbo.query("select * from TaxRate")
+    existentes_rate = {t.get("Name"): t["Id"] for t in rates}
+    valor_rate = {t["Id"]: float(t.get("RateValue") or 0) for t in rates}
 
-    def detalle(nombre: str, valor: float) -> dict:
+    def partes_de(code: dict) -> list[float]:
+        refs = (code.get("SalesTaxRateList") or {}).get("TaxRateDetail") or []
+        return sorted(valor_rate.get(r.get("TaxRateRef", {}).get("value"), -1.0) for r in refs)
+
+    def pedido(nombre: str, valor: float) -> dict:
         if nombre in existentes_rate:
             return {"TaxRateId": existentes_rate[nombre]}
         return {"TaxRateName": nombre, "RateValue": valor, "TaxAgencyId": agencia, "TaxApplicableOn": "Sales"}
 
-    estado_nombre = f"TX estado {R['tasa_estado']:g}%"
-    deseadas = {SOLO_ESTADO: [(estado_nombre, R["tasa_estado"])]}
-    for nombre, j in R["jurisdicciones"].items():
-        deseadas[nombre] = [(estado_nombre, R["tasa_estado"]),
-                            (f"{j['nombre_comptroller']} {j['tasa']:g}%", j["tasa"])]
-
-    existentes_code = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxCode")}
-    codigos = {}
-    for nombre, partes in deseadas.items():
-        etiqueta = f"EzSnack {nombre}"
-        if etiqueta in existentes_code:
-            codigos[nombre] = existentes_code[etiqueta]
-            continue
-        creado = qbo._peticion("POST", "taxservice/taxcode", json_body={
-            "TaxCode": etiqueta, "TaxRateDetails": [detalle(n, v) for n, v in partes]})
-        codigos[nombre] = str(creado.get("TaxCodeId") or creado.get("Id"))
-        # las tasas que acaba de crear ya existen para el siguiente codigo
-        existentes_rate = {t.get("Name"): t["Id"] for t in qbo.query("select * from TaxRate")}
-    return codigos
+    codes = {t.get("Name"): t for t in qbo.query("select * from TaxCode")}
+    codigos, resumen = {}, []
+    for nombre, partes in _deseadas(R).items():
+        total = sum(v for _, v in partes)
+        quiere = sorted(v for _, v in partes)
+        etiqueta, accion = f"EzSnack {nombre}", "ya estaba"
+        actual = codes.get(etiqueta)
+        if actual is not None and partes_de(actual) != quiere:
+            etiqueta, actual = f"EzSnack {nombre} {total:g}%", codes.get(f"EzSnack {nombre} {total:g}%")
+        if actual is None:
+            creado = qbo._peticion("POST", "taxservice/taxcode", json_body={
+                "TaxCode": etiqueta, "TaxRateDetails": [pedido(n, v) for n, v in partes]})
+            codigos[nombre], accion = str(creado.get("TaxCodeId") or creado.get("Id")), "creada"
+            # las tasas que acaba de crear ya existen para el siguiente codigo
+            rates = qbo.query("select * from TaxRate")
+            existentes_rate = {t.get("Name"): t["Id"] for t in rates}
+            valor_rate = {t["Id"]: float(t.get("RateValue") or 0) for t in rates}
+        else:
+            codigos[nombre] = actual["Id"]
+        resumen.append({"jurisdiccion": nombre, "codigo": etiqueta, "id": codigos[nombre], "total": total,
+                        "partes": [{"nombre": n, "tasa": v} for n, v in partes], "estado": accion})
+    return (codigos, resumen) if detalle else codigos
 
 
 def _preparar(qbo: QBO) -> tuple[str, dict[str, str], dict[str, str]]:
@@ -106,6 +129,26 @@ def _preparar(qbo: QBO) -> tuple[str, dict[str, str], dict[str, str]]:
         items[clave] = _asegurar(qbo, "Item", "Name", nombre, {
             "Name": nombre, "Type": "Service", "Taxable": gravable, "IncomeAccountRef": {"value": cuenta}})["Id"]
     return cliente, items, tasas(qbo)
+
+
+def preparar(qbo: QBO) -> dict:
+    """Deja la empresa de QuickBooks con las reglas de impuestos de EzSnack. Se llama al conectar.
+
+    Crea lo que falte y no toca lo que ya esta: la agencia (Texas Comptroller), las tasas propias,
+    los tres productos con su marca de gravable o no, el cliente generico y la cuenta de ingresos.
+    """
+    cuenta = _asegurar(qbo, "Account", "Name", CUENTA_INGRESOS, {"Name": CUENTA_INGRESOS, "AccountType": "Income"})
+    cliente = _asegurar(qbo, "Customer", "DisplayName", CLIENTE, {"DisplayName": CLIENTE})
+    productos = []
+    for _, (nombre, gravable) in ITEMS.items():
+        it = _asegurar(qbo, "Item", "Name", nombre, {
+            "Name": nombre, "Type": "Service", "Taxable": gravable, "IncomeAccountRef": {"value": cuenta["Id"]}})
+        if bool(it.get("Taxable")) != gravable:   # alguien le cambio la marca en QuickBooks: se corrige
+            it = qbo.actualizar("Item", {"Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable})
+        productos.append({"nombre": nombre, "gravable": gravable, "id": it["Id"]})
+    codigos, resumen = tasas(qbo, detalle=True)
+    return {"tasas": codigos, "detalle": resumen, "productos": productos,
+            "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
 
 
 def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fecha: str) -> dict | None:
@@ -137,7 +180,7 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
     return r
 
 
-def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int) -> dict:
+def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list[dict] | None = None) -> dict:
     cliente, items, codigos = _preparar(qbo)
     fecha = date(anio, mes, monthrange(anio, mes)[1]).isoformat()
     prefijo = f"V{anio % 100:02d}{mes:02d}-"
@@ -188,7 +231,20 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int) -> dict:
                       "total": float(r.get("TotalAmt") or 0), "impuesto": float(detalle.get("TotalTax") or 0)})
     for v in por_tasa.values():
         v["base"], v["impuesto"] = round(v["base"], 2), round(v["impuesto"], 2)
+    # Cuadre: lo que devolvio QuickBooks contra lo que calculo la aplicacion, tasa por tasa
+    cuadre = []
+    for e in esperado or []:
+        q = por_tasa.get(e["jurisdiccion"], {"base": 0.0, "impuesto": 0.0})
+        cuadre.append({"jurisdiccion": e["jurisdiccion"], "tasa": e["tasa"],
+                       "base_app": e["base"], "base_qbo": q["base"],
+                       "impuesto_app": e["impuesto"], "impuesto_qbo": q["impuesto"],
+                       "igual": abs(e["base"] - q["base"]) < 0.005 and abs(e["impuesto"] - q["impuesto"]) < 0.005})
+    for nombre, q in por_tasa.items():
+        if esperado is not None and nombre not in {e["jurisdiccion"] for e in esperado}:
+            cuadre.append({"jurisdiccion": nombre, "tasa": q["tasa"], "base_app": 0.0, "base_qbo": q["base"],
+                           "impuesto_app": 0.0, "impuesto_qbo": q["impuesto"], "igual": False})
     return {
+        "cuadre": cuadre, "cuadra": bool(cuadre) and all(c["igual"] for c in cuadre) and not errores,
         "recibos": filas, "errores": errores,
         "creados": sum(f["estado"] == "creado" for f in filas),
         "actualizados": sum(f["estado"] == "actualizado" for f in filas),
@@ -199,4 +255,4 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int) -> dict:
     }
 
 
-__all__ = ["enviar", "tasas", "QBOError"]
+__all__ = ["enviar", "preparar", "tasas", "QBOError"]

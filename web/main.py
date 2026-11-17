@@ -29,6 +29,7 @@ from pydantic import BaseModel
 RAIZ = Path(__file__).resolve().parents[1]
 
 from ezsnack import cierre as cie  # noqa: E402
+from ezsnack import comparar as cmp  # noqa: E402
 from ezsnack import contabilidad as conta  # noqa: E402
 from ezsnack import lectores as lec  # noqa: E402
 from ezsnack import libro as lib  # noqa: E402
@@ -134,7 +135,13 @@ def callback(request: Request, code: str = "", realmId: str = "", state: str = "
     if state != request.cookies.get("ezsnack_estado"):
         return RedirectResponse("/?conexion=invalida")
     tokens = qbo_mod.obtener_tokens(code, realmId)
-    resp = RedirectResponse("/?conexion=ok")
+    # Al conectar se deja la empresa con las reglas de impuestos de EzSnack (tasas, productos, cliente)
+    reglas_ok = "ok"
+    try:
+        conta.preparar(qbo_mod.QBO(tokens))
+    except Exception:  # noqa: BLE001  la conexion sirve igual; la pagina lo vuelve a intentar
+        reglas_ok = "pendiente"
+    resp = RedirectResponse(f"/?conexion=ok&reglas={reglas_ok}")
     _poner_cookie(resp, tokens)
     resp.delete_cookie("ezsnack_estado")
     return resp
@@ -173,7 +180,8 @@ def _registros(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records", force_ascii=False))
 
 
-def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src, mapeos: dict | None = None) -> dict:
+def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src, mapeos: dict | None = None,
+               formatos: list | None = None) -> dict:
     if not reportes:
         raise HTTPException(400, "Suba al menos un reporte de ventas.")
     try:
@@ -183,7 +191,7 @@ def _leer_todo(maquinas_src, reportes: list[tuple], pagados_src, mapeos: dict | 
     lecturas, sin_leer = [], []
     for src, nombre in reportes:
         try:
-            lecturas.append(lec.leer(src, nombre, (mapeos or {}).get(nombre)))
+            lecturas.append(lec.leer(src, nombre, (mapeos or {}).get(nombre), formatos))
         except lec.FormatoDesconocido as exc:
             sin_leer.append({"archivo": nombre, "error": str(exc), "columnas": exc.columnas, "mapeo": exc.mapeo})
         except Exception as exc:  # noqa: BLE001
@@ -204,12 +212,15 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
     res = _calcular(c, anio, mes, ajustes)
     columnas_maq = ["id_maquina", "maquina", "fuente", "locacion", "ciudad", "jurisdiccion", "en_lista",
                     "unidades", "ventas", "exentas", "pagadas", "gravable"]
+    comparacion = cmp.comparar(c["original"], res, c["maquinas"]) if c.get("original") else None
     return {
+        "comparacion": comparacion,
         "archivos": [{"archivo": l.archivo, "fuente": l.fuente, "periodo": l.periodo, "leidas": l.leidas,
                       "usadas": int(len(l.filas)), "descartadas": l.descartadas,
                       "efectivo": round(float(l.filas["efectivo"].sum()), 2),
                       "tarjeta": round(float(l.filas["tarjeta"].sum()), 2),
-                      "generico": l.generico, "columnas": l.columnas, "mapeo": l.mapeo}
+                      "generico": l.generico, "registrado": l.registrado, "avisos": l.avisos,
+                      "columnas": l.columnas, "mapeo": l.mapeo}
                      for l in c["lecturas"]],
         "sin_leer": c["sin_leer"], "campos": lec.NOMBRES_CAMPOS, "reglas": res["reglas"],
         "lista_pagados": c["lista_pagados"],
@@ -237,7 +248,7 @@ async def _archivo(u: UploadFile) -> tuple[io.BytesIO, str]:
 @app.post("/api/cierre/archivos")
 async def subir(anio: int, mes: int, maquinas: UploadFile = File(...), reportes: list[UploadFile] = File(...),
                 pagados: UploadFile | None = File(default=None), mapeos: str = Form(default=""),
-                ajustes: str = Form(default="")):
+                ajustes: str = Form(default=""), formatos: str = Form(default="")):
     reps = [await _archivo(u) for u in reportes if u.filename]
     pag = await _archivo(pagados) if pagados is not None and pagados.filename else None
     try:
@@ -245,7 +256,11 @@ async def subir(anio: int, mes: int, maquinas: UploadFile = File(...), reportes:
         aj = json.loads(ajustes) if ajustes else None
     except ValueError:
         mapas, aj = {}, None
-    datos = _leer_todo(await _archivo(maquinas), reps, pag, mapas)
+    try:
+        fmts = [f for f in json.loads(formatos) if isinstance(f, dict)] if formatos else []
+    except ValueError:
+        fmts = []
+    datos = _leer_todo(await _archivo(maquinas), reps, pag, mapas, fmts)
     if not datos["lecturas"]:
         return JSONResponse({"detail": "No se pudo leer ningún reporte.", "sin_leer": datos["sin_leer"],
                              "campos": lec.NOMBRES_CAMPOS}, status_code=422)
@@ -284,14 +299,36 @@ def descargar_libro(codigo: str, p: Pedido):
                     headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
 
 
+@app.post("/api/cierre/{codigo}/comparar")
+async def comparar_original(codigo: str, anio: int, mes: int, original: UploadFile = File(...), ajustes: str = Form(default="")):
+    """Recibe el Excel integrado hecho a mano y lo compara, renglon por renglon, con este cierre."""
+    c = _cierre(codigo)
+    try:
+        c["original"] = cmp.leer_original(*(await _archivo(original)))
+    except cmp.ExcelNoReconocido as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        aj = json.loads(ajustes) if ajustes else None
+    except ValueError:
+        aj = None
+    return _resultado(c, anio, mes, aj)
+
+
+@app.post("/api/cierre/{codigo}/comparar/quitar")
+def quitar_original(codigo: str, p: Pedido):
+    c = _cierre(codigo)
+    c.pop("original", None)
+    return _resultado(c, p.anio, p.mes, p.ajustes)
+
+
 @app.get("/api/quickbooks/tasas")
 def ver_tasas(request: Request):
-    """Crea (si faltan) y devuelve las tres tasas propias de EzSnack en QuickBooks."""
+    """Deja (si falta algo) y devuelve la configuracion de impuestos de EzSnack en QuickBooks."""
     tokens = _leer_tokens(request)
     if not tokens:
         raise HTTPException(401, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
-    resp = JSONResponse({"tasas": conta.tasas(qbo), "empresa": qbo.info_empresa().get("CompanyName")})
+    resp = JSONResponse({**conta.preparar(qbo), "empresa": qbo.info_empresa().get("CompanyName")})
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp
@@ -305,7 +342,7 @@ def enviar_quickbooks(request: Request, codigo: str, p: Pedido):
         raise HTTPException(401, "Conecte QuickBooks primero.")
     res = _calcular(_cierre(codigo), p.anio, p.mes, p.ajustes)
     qbo = qbo_mod.QBO(tokens)
-    resp = JSONResponse(conta.enviar(qbo, res["maquinas"], p.anio, p.mes))
+    resp = JSONResponse(conta.enviar(qbo, res["maquinas"], p.anio, p.mes, res["declaracion"]["quickbooks_esperado"]))
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp

@@ -4,20 +4,28 @@
   "tasa_compras": 6.25,
   "descuento_a_tiempo_pct": 0.5,
   "cupones_empresa_minimo": 100,
+  "devoluciones": {
+    "metodo": "cupones",
+    "porcentaje": 3.0
+  },
   "jurisdicciones": {
     "Houston": {
       "codigo": "2101017",
       "nombre_comptroller": "HOUSTON-CITY",
       "tasa": 1.0,
-      "ciudades": ["Houston"],
-      "resta_compras": true
+      "ciudades": [
+        "Houston"
+      ]
     },
     "Houston MTA": {
       "codigo": "3101990",
       "nombre_comptroller": "HOUSTON MTA",
       "tasa": 1.0,
-      "ciudades": ["Bellaire", "Katy", "Spring"],
-      "resta_compras": false
+      "ciudades": [
+        "Bellaire",
+        "Katy",
+        "Spring"
+      ]
     }
   }
 }

@@ -77,13 +77,25 @@ En la sección Reglas de la página se cambian las ciudades de cada jurisdicció
 
 Si llega un reporte de otro sistema, o un lector cambia el formato del suyo, la página reconoce las columnas por su nombre, en español o en inglés, y propone cuál es la máquina, el producto, la cantidad y el valor vendido. Si no acierta, la persona elige la columna de cada campo en una lista y vuelve a calcular.
 
-## Verificación con septiembre de 2026
+## Que QuickBooks dé lo mismo que la aplicación
 
-Con los archivos reales de septiembre, el programa cuadra al centavo con el total que cada lector trae en su propio reporte, y QuickBooks reporta las mismas ventas gravables que calcula la aplicación.
+Todo se calcula primero por máquina y al centavo: lo vendido, las devoluciones, el agua, lo comprado con impuesto pagado y la venta gravable. El resumen de la página, la hoja Machines del Excel y los recibos de QuickBooks son esa misma tabla, así que no pueden dar bases distintas. La base de HOUSTON-CITY y la de HOUSTON MTA son las ventas gravables de las máquinas de esas ciudades, que es sobre lo que QuickBooks cobra el 1 %.
 
-Queda una diferencia contra lo que declaró la empresa, 3,970.79 dólares. Viene de dos cosas. La primera es el agua y los productos comprados por fuera, que el gerente filtró a mano y no coinciden con lo que sale de los datos. La segunda son las devoluciones: él descontó un 3 % estimado, unos 1,883 dólares, mientras que los cupones devueltos a clientes en septiembre fueron 90. Las dos hay que confirmarlas con él.
+Al conectar QuickBooks, la aplicación deja la empresa configurada sin que nadie entre a Sales Tax: crea la agencia, las tres tasas propias, los tres productos con su marca de gravable o no, el cliente y la cuenta de ingresos. Si en las reglas cambia un porcentaje, crea un código de impuesto nuevo, porque QuickBooks no deja editar una tasa por la API.
 
-Los archivos reales de la empresa no se publican en este repositorio. La carpeta datos_prueba tiene archivos con el mismo formato, pero con máquinas y ventas inventadas, y se generan con scripts/generar_datos_prueba.py.
+Después de enviar el mes, la página muestra tasa por tasa la base y el impuesto de la aplicación al lado de los que devolvió QuickBooks, y marca si son iguales. QuickBooks redondea el impuesto recibo por recibo; el Comptroller redondea las bases a dólares enteros. Por eso el valor del Comptroller puede diferir en centavos, y la página muestra los dos.
+
+## Devoluciones a clientes
+
+Es una regla que se cambia en la página. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan.
+
+## Comparar con el Excel hecho a mano
+
+En el paso 3 se sube el Excel integrado que el gerente armó para el mismo mes. La aplicación lee su tabla y su resumen, compara renglón por renglón y busca la causa de cada diferencia en los datos: una máquina que está en el reporte del lector y no en el Excel, un porcentaje fijo en lugar de los cupones, una cifra digitada que no sale de la tabla del mismo archivo, o una máquina que se quedó por fuera al filtrar a mano las de Houston. Sirve para correr un mes en paralelo antes de dejar el proceso manual.
+
+## Registrar otro sistema de ventas
+
+Nayax, AV360, XMAI y Qingo vienen reconocidos. Cuando llega el reporte de otro sistema, la página propone cuál columna es la máquina, el producto, la cantidad y el valor. La persona corrige lo que haga falta, le pone un nombre al sistema y lo registra. Desde ese momento sus reportes se reconocen solos y aparecen con ese nombre. Los sistemas registrados se ven y se quitan en Reglas, y quedan guardados en el navegador.
 
 ## Publicarla en internet
 

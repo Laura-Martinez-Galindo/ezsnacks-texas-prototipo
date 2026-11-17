@@ -153,7 +153,7 @@
         <h3>QuickBooks</h3>
         <div class="envio">
           <div>
-            <p class="guia" id="guia-qbo">Crea un recibo de venta por máquina con su dirección y la tasa que le corresponde, y QuickBooks calcula el impuesto.</p>
+            <p class="guia" id="guia-qbo">Crea un recibo de venta por máquina con la tasa que le corresponde. QuickBooks calcula el impuesto y aquí se comprueba que dé lo mismo.</p>
           </div>
           <button class="boton boton-secundario" id="btn-qbo">Enviar a QuickBooks</button>
         </div>
@@ -164,9 +164,17 @@
         </div>
       </div>
 
-      <div id="verificacion" hidden>
-        <h3>Comparación con el Excel del gerente</h3>
-        <div class="tabla-envoltura"><table class="tabla" id="tabla-verif"></table></div>
+      <div id="bloque-comparar">
+        <h3>Comparar con el Excel hecho a mano</h3>
+        <div class="envio">
+          <p class="guia" id="guia-comparar">Suba el Excel integrado que armó a mano para el mismo mes. La aplicación lo compara renglón por renglón y busca en los datos la causa de cada diferencia.</p>
+          <label class="boton boton-secundario" for="archivo-original" id="btn-comparar">Elegir Excel</label>
+          <input type="file" id="archivo-original" accept=".xlsx,.xls" class="oculto">
+        </div>
+        <div id="res-comparar" hidden>
+          <div class="tabla-envoltura"><table class="tabla" id="tabla-comparar"></table></div>
+          <p class="nota-tabla" id="nota-comparar"></p>
+        </div>
       </div>
     </section>
 
@@ -181,7 +189,17 @@
           <input type="text" id="cfg-mta">
           <small>Separadas por coma. Las demás ciudades solo pagan el 6.25 % del estado.</small>
         </label>
-        <label>Un mes de cupones es venta a una empresa desde
+        <label>Devoluciones a clientes
+          <select id="cfg-dev">
+            <option value="cupones">Cupones de reembolso del mes</option>
+            <option value="porcentaje">Porcentaje fijo de lo vendido</option>
+          </select>
+          <small>Con cupones se resta lo que de verdad se devolvió. Con porcentaje fijo se calcula como el Excel hecho a mano.</small>
+        </label>
+        <label id="cfg-pct-campo">Porcentaje de devoluciones
+          <span class="campo-unidad"><input type="number" id="cfg-pct" min="0" max="100" step="0.1"><span>%</span></span>
+        </label>
+        <label id="cfg-cupones-campo">Un mes de cupones es venta a una empresa desde
           <span class="campo-unidad"><span>$</span><input type="number" id="cfg-cupones" min="0" step="1"></span>
           <small>Por debajo de ese monto se toman como devoluciones a clientes.</small>
         </label>
@@ -190,7 +208,11 @@
           <button class="enlace" type="button" id="btn-cfg-reset">Volver a las originales</button>
         </div>
       </form>
-      <p class="nota-tabla">Las tasas del impuesto no se cambian aquí: las mantiene Intuit dentro de QuickBooks.</p>
+      <p class="nota-tabla">Si cambia una regla después de enviar el mes a QuickBooks, vuelva a enviarlo: los recibos se actualizan, no se duplican.</p>
+
+      <h3>Sistemas de ventas registrados</h3>
+      <p class="guia">Nayax, AV360, XMAI y Qingo ya vienen. Cuando llega el reporte de otro sistema, en el paso 1 se le dice una sola vez cuál columna es cada dato y se guarda con un nombre. Desde ahí se reconoce solo.</p>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-formatos"></table></div>
     </section>
 
     <!-- Como funciona -->
