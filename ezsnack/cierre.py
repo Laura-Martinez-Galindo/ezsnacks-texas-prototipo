@@ -91,6 +91,19 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         lambda c: next((k for k, v in J.items() if c.lower() in [x.lower() for x in v["ciudades"]]), "")))
     vendidos = (integ.groupby("producto", as_index=False).agg(ventas=("ventas", "sum"), cantidad=("cantidad", "sum"))
                 .sort_values("ventas", ascending=False))
+    comisiones = (integ.groupby("locacion", as_index=False)
+                  .agg(ciudad=("ciudad", _primero), maquinas=("id_maquina", lambda s: s.nunique()),
+                       unidades=("cantidad", "sum"), ventas=("ventas", "sum"),
+                       costo=("costo", lambda s: s.sum(min_count=1)),
+                       utilidad=("utilidad", lambda s: s.sum(min_count=1))))
+    con_utilidad = comisiones["utilidad"].notna()
+    comisiones["utilidad"] = comisiones["utilidad"].fillna(0)
+    comisiones["costo"] = comisiones["costo"].fillna(0)
+    # Solo califican los lugares con datos de utilidad; sin costo reportado no se puede saber
+    comisiones["califica"] = con_utilidad & (comisiones["utilidad"] >= 300)
+    comisiones["sin_datos"] = ~con_utilidad
+    comisiones["locacion"] = comisiones["locacion"].replace("", "(sin locación)")
+    comisiones = comisiones.sort_values(["califica", "utilidad"], ascending=[False, False])
 
     propuesta = [p for p in vendidos["producto"] if prod.es_exento(p)]
     exentos = set(propuesta if a.exentos is None else a.exentos)
@@ -196,4 +209,5 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         revisar.append({"texto": f["buscado"], "detalle": "Está en la lista de compras, pero no tuvo ventas este mes."})
 
     return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "cupones": cupones, "exentos": lista_exentos, "pagados": cruce,
+            "comisiones": comisiones, "comision_minimo": 300, "comision_tasa": None,
             "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}

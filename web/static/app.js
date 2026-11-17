@@ -209,7 +209,43 @@ function mostrar(d) {
   pintarArchivos(d);
   pintarProductos(d);
   pintarDeclaracion(d);
+  pintarComisiones(d);
   imprimirTiquete(d);
+  // Guardar el cierre para poder navegar por el menu sin volver a empezar
+  try { localStorage.setItem("ezsnack_cierre", JSON.stringify({ codigo: estado.codigo, ejemplo: estado.ejemplo, d })); }
+  catch { /* sin espacio */ }
+}
+
+function restaurarCierre() {
+  let g = null;
+  try { g = JSON.parse(localStorage.getItem("ezsnack_cierre") || "null"); } catch { return; }
+  if (!g || !g.d) return;
+  try {
+    estado.codigo = g.codigo; estado.ejemplo = g.ejemplo;
+    mostrar(g.d);
+    $$(".paso").forEach((p) => (p.disabled = false));
+    avisar("Se recuperó el último cierre guardado.");
+  } catch (e) {
+    console.error("No se pudo restaurar el cierre guardado:", e);
+    localStorage.removeItem("ezsnack_cierre");
+  }
+}
+
+function pintarComisiones(d) {
+  const filas = d?.comisiones || [];
+  $("#comisiones-vacio").hidden = filas.length > 0;
+  tabla($("#tabla-comisiones"), [
+    { t: "Locación", html: (f) => `${esc(f.locacion)}${f.sin_datos ? `<span class="sub">Sin datos de costo</span>` : ""}` },
+    { t: "Ciudad", v: (f) => f.ciudad || "—" },
+    { t: "Máquinas", num: true, v: (f) => entero(f.maquinas) },
+    { t: "Unidades", num: true, v: (f) => entero(f.unidades) },
+    { t: "Ventas", num: true, html: (f) => dinero(f.ventas) },
+    { t: "Costo", num: true, html: (f) => dinero(f.costo) },
+    { t: "Utilidad", num: true, html: (f) => dinero(f.utilidad) },
+    { t: "Estado", html: (f) => (f.califica ? `<strong class="positivo">Califica</strong>` : f.sin_datos ? "Sin datos" : "No califica") },
+    { t: "Comisión", num: true, html: () => "Pendiente" },
+  ], filas);
+  if (!filas.length) $("#tabla-comisiones").innerHTML = `<tbody><tr><td>No hay datos de lugares para calcular comisiones.</td></tr></tbody>`;
 }
 
 const DESCARTE = { "filas de total o vacias": "filas de totales del reporte, sin venta propia", "transacciones rechazadas (valor 0)": "cobros rechazados por la tarjeta, en $0", "filas sin valor": "filas en $0" };
@@ -593,6 +629,8 @@ if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se ca
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);
 if (q.has("conexion")) history.replaceState(null, "", "/");
 estado.config = leerConfig();
+restaurarCierre();
+pintarComisiones(estado.res);   // mensaje vacio si aun no hay cierre
 cargarEstado().then(() => {
   pintarConfig();
   if (estado.conectado) api("/api/quickbooks/tasas").then((d) => { estado.tasas = d.tasas; pintarComo(); }).catch(() => {});
