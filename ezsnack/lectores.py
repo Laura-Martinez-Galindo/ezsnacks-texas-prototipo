@@ -70,6 +70,8 @@ class Lectura:
     generico: bool = False                              # leido por reconocimiento de columnas
     columnas: list = field(default_factory=list)        # columnas del archivo
     mapeo: dict = field(default_factory=dict)           # campo -> columna usada
+    avisos: list = field(default_factory=list)          # cosas que el usuario debe saber de este archivo
+    registrado: bool = False                            # leido con un formato que el usuario registro
 
 
 def id_maquina(nombre) -> str | None:
@@ -185,10 +187,13 @@ def _generico(df: pd.DataFrame, mapeo: dict, fuente: str) -> Lectura:
                    generico=True, columnas=[str(c) for c in df.columns], mapeo=m)
 
 
-def leer(fuente, nombre: str | None = None, mapeo: dict | None = None) -> Lectura:
+def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos: list[dict] | None = None) -> Lectura:
     """Lee un reporte. Si no es de un lector conocido, reconoce las columnas por su nombre.
 
     Con `mapeo` (campo -> columna) se usa ese mapeo en lugar del reconocimiento automatico.
+    `formatos` son los sistemas que el usuario registro: [{"nombre": "Cantaloupe", "mapeo": {...}}].
+    Un archivo que trae todas las columnas de un formato registrado se lee con ese formato y queda
+    con el nombre del sistema, sin volver a preguntar.
     """
     nombre = nombre or getattr(fuente, "name", None) or str(fuente)
     archivo = Path(str(nombre)).name
@@ -214,6 +219,18 @@ def leer(fuente, nombre: str | None = None, mapeo: dict | None = None) -> Lectur
                 sistema, fila = hallado
                 lector = {"Nayax": _nayax, "AV360": _av360, "XMAI": _xmai, "Qingo": _qingo}[sistema]
                 return terminar(lector(tabla(crudo, fila)), crudo, fila)
+        for formato in formatos or []:
+            m = {k: v for k, v in (formato.get("mapeo") or {}).items() if v}
+            if not m.get("maquina") or not m.get("producto"):
+                continue
+            for crudo in hojas:
+                hallado = _encabezado_generico(crudo, m)
+                if hallado:
+                    df = tabla(crudo, hallado[0])
+                    df = df.loc[:, [c for c in df.columns if c and c != "nan"]]
+                    lectura = terminar(_generico(df, m, str(formato.get("nombre") or "Otro")[:24]), crudo, hallado[0])
+                    lectura.generico, lectura.registrado = False, True
+                    return lectura
     columnas: list[str] = []
     for crudo in hojas:
         hallado = _encabezado_generico(crudo, mapeo)
@@ -256,7 +273,9 @@ def _nayax(df: pd.DataFrame) -> Lectura:
     leidas = len(df)
     df, totales = _filas_validas(df, "Machine Name", "Product Name")
     valor = _num(df["Settlement Value (Vend Price)"])
-    declinadas = valor <= 0  # tarjeta rechazada o venta anulada: no se cobro nada
+    # En cero: tarjeta rechazada, no se cobro nada. En negativo: Nayax le devolvio la plata al
+    # cliente; esa fila se deja para que reste, igual que en el total del propio reporte.
+    declinadas = valor == 0
     df, valor = df[~declinadas], valor[~declinadas]
     cant = _num(df["Quantity"]) if "Quantity" in df else pd.Series(0.0, index=df.index)
     cant = cant.where(cant > 0, 1.0)  # Nayax deja la cantidad vacia cuando es una unidad
@@ -268,8 +287,10 @@ def _nayax(df: pd.DataFrame) -> Lectura:
     filas = _salida("Nayax", df["Machine Name"], df["Product Name"], cant,
                     efectivo=valor.where(es_efectivo, 0.0), tarjeta=valor.where(es_tarjeta, 0.0),
                     prepago=valor.where(es_prepago, 0.0), otros=valor.where(es_otro, 0.0))
-    return Lectura("", "Nayax", filas, leidas, {"filas de total o vacias": totales,
-                                                "transacciones rechazadas (valor 0)": int(declinadas.sum())})
+    lectura = Lectura("", "Nayax", filas, leidas, {"filas de total o vacias": totales,
+                                                   "transacciones rechazadas (valor 0)": int(declinadas.sum())})
+    lectura.avisos = [f"{int((valor < 0).sum())} devoluciones hechas desde Nayax por ${-float(valor[valor < 0].sum()):,.2f}: restan de la venta."] if (valor < 0).any() else []
+    return lectura
 
 
 def _av360(df: pd.DataFrame) -> Lectura:
