@@ -691,7 +691,10 @@ $("#form-reglas").addEventListener("submit", (ev) => {
     await cargarConfig();
     if (estado.codigo) { estado.ajustes.cupones_empresa = null; estado.envio = null; recalcular(); }
     if (estado.conectado && r.reglas.contabilidad.destino === "quickbooks") {
-      try { const t = await api("/api/quickbooks/tasas"); estado.tasas = t.tasas; pintarComo(); avisar("QuickBooks quedó con las tasas de las reglas nuevas."); }
+      try {
+        const t = await api("/api/quickbooks/tasas"); estado.tasas = t.tasas; pintarComo();
+        avisar(`Las reglas nuevas se migraron a QuickBooks: ${Object.keys(t.tasas).length} códigos de impuesto y ${t.catalogo.en_quickbooks} productos, ${t.catalogo.agua} de ellos agua sin impuesto.`);
+      }
       catch (e) { avisar(`Las reglas se guardaron, pero QuickBooks no se pudo actualizar: ${e.message}`, true); }
     }
   });
@@ -700,17 +703,19 @@ $("#form-reglas").addEventListener("submit", (ev) => {
 /* productos */
 function pintarCatalogo() {
   const el = $("#tabla-catalogo"); if (!el || !estado.cfg) return;
-  const filas = Object.entries(estado.cfg.productos).map(([nombre, p]) => ({ nombre, ...p })).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const q = ($("#prod-nuevo")?.value || "").trim().toLowerCase();
+  const todas = Object.entries(estado.cfg.productos).map(([nombre, p]) => ({ nombre, ...p })).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const filas = todas.filter((f) => !q || f.nombre.toLowerCase().includes(q));
   if (!filas.length) { el.innerHTML = `<tbody><tr><td>Todavía no hay productos clasificados a mano. Se guardan solos cuando se marcan en el paso 2.</td></tr></tbody>`; return; }
   tabla(el, [
     { t: "Producto", v: (f) => f.nombre },
     { t: "Impuesto", html: (f) => `<select data-cat="${esc(f.nombre)}" aria-label="Impuesto de ${esc(f.nombre)}" ${soloOperador()}>
-        <option value="auto" ${f.exento == null ? "selected" : ""}>Automático</option>
+        <option value="auto" ${f.exento == null ? "selected" : ""}>Automático: ${f.regla_agua ? "agua, sin impuesto" : "con impuesto"}</option>
         <option value="exento" ${f.exento === true ? "selected" : ""}>Sin impuesto (agua)</option>
         <option value="gravable" ${f.exento === false ? "selected" : ""}>Con impuesto</option></select>` },
     { t: "Se compra por fuera", html: (f) => `<input type="checkbox" data-cat-pag="${esc(f.nombre)}" ${f.pagado_habitual ? "checked" : ""} ${soloOperador()} aria-label="Se compra por fuera: ${esc(f.nombre)}">` },
     { t: "Último cambio", html: (f) => `${esc(f.por || "")}<span class="sub">${esc(fecha(f.actualizado))}</span>` },
-  ], filas);
+  ], filas, ["", "", "", `${filas.length} de ${todas.length} productos`]);
 }
 async function clasificar(cambio) {
   try {
@@ -724,6 +729,7 @@ document.addEventListener("change", (ev) => {
   if (t.matches("[data-cat]")) clasificar(t.value === "auto" ? { nombre: t.dataset.cat, automatico: true } : { nombre: t.dataset.cat, exento: t.value === "exento" });
   if (t.matches("[data-cat-pag]")) clasificar({ nombre: t.dataset.catPag, pagado_habitual: t.checked });
 });
+$("#prod-nuevo").addEventListener("input", pintarCatalogo);
 $("#btn-prod-nuevo").addEventListener("click", () => {
   const nombre = $("#prod-nuevo").value.trim();
   if (!nombre) { avisar("Escriba el nombre del producto.", true); return; }
@@ -961,7 +967,7 @@ function pintarComo() {
 /* ---------- inicio ---------- */
 const q = new URLSearchParams(location.search);
 if (q.get("conexion") === "ok") avisar(q.get("reglas") === "ok"
-  ? "Conectado. QuickBooks quedó con las tasas, los productos y el cliente de EzSnack."
+  ? "Conectado. Las reglas de impuestos se migraron a QuickBooks: códigos de impuesto por jurisdicción y cada producto con su marca de gravable."
   : "Conectado a QuickBooks.");
 if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se canceló.", true);
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);

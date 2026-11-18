@@ -148,11 +148,18 @@ def _preparar(qbo: QBO, R: dict | None = None) -> tuple[str, dict[str, str], dic
     return cliente, items, tasas(qbo, R=R)
 
 
-def preparar(qbo: QBO, R: dict | None = None) -> dict:
-    """Deja la empresa de QuickBooks con las reglas de impuestos de EzSnack. Se llama al conectar.
+def gravables_del_catalogo(catalogo: dict, R: dict) -> dict[str, bool]:
+    """producto -> paga impuesto, con la clasificacion guardada o, si esta en automatico, la regla del agua."""
+    from .productos import es_exento
+    return {p: not (c["exento"] if c.get("exento") is not None else es_exento(p, R)) for p, c in catalogo.items()}
 
-    Crea lo que falte y no toca lo que ya esta: la agencia (Texas Comptroller), las tasas propias,
-    los tres productos con su marca de gravable o no, el cliente generico y la cuenta de ingresos.
+
+def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None) -> dict:
+    """Migra las reglas de impuestos de EzSnack a la empresa de QuickBooks. Se llama al conectar.
+
+    Crea lo que falte y corrige lo que no coincida, sin tocar transacciones: la agencia (Texas
+    Comptroller), un tax code por jurisdiccion, los items de devoluciones y cupones, el cliente, la
+    cuenta de ingresos y un item por cada producto del catalogo con su marca de gravable (el agua no).
     """
     n_cuenta, n_cliente = _nombres(R)
     cuenta = _asegurar(qbo, "Account", "Name", n_cuenta, {"Name": n_cuenta, "AccountType": "Income"})
@@ -165,7 +172,12 @@ def preparar(qbo: QBO, R: dict | None = None) -> dict:
             it = qbo.actualizar("Item", {"Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable})
         productos.append({"nombre": nombre, "gravable": gravable, "id": it["Id"]})
     codigos, resumen = tasas(qbo, detalle=True, R=R)
-    return {"tasas": codigos, "detalle": resumen, "productos": productos,
+    catalogo_qbo = {"en_quickbooks": 0, "creados": 0, "cambiados": 0, "agua": 0, "errores": []}
+    if catalogo:
+        gravables = gravables_del_catalogo(catalogo, R or reglas())
+        ids, sinc = sincronizar_productos(qbo, gravables, cuenta["Id"])
+        catalogo_qbo = {**sinc, "en_quickbooks": len(set(ids.values())), "agua": sum(1 for v in gravables.values() if not v)}
+    return {"tasas": codigos, "detalle": resumen, "productos": productos, "catalogo": catalogo_qbo,
             "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
 
 

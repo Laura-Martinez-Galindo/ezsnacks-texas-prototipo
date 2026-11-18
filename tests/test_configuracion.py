@@ -62,7 +62,7 @@ def test_la_clasificacion_guardada_manda_sobre_la_regla_del_agua():
     r = cierre.calcular(integ, cierre.Ajustes(catalogo=almacen.productos()), 2026, 9)
     assert agua not in r["lista_exentos"] and otro in r["lista_exentos"]
     almacen.marcar_producto(agua, "Humberto", exento=None)          # vuelve a lo automatico
-    assert agua not in almacen.productos()
+    assert almacen.productos()[agua]["exento"] is None
 
 
 def test_sin_lista_del_mes_se_proponen_las_compras_habituales():
@@ -159,3 +159,30 @@ def test_las_reglas_quedan_en_quickbooks_y_cuadra():
     e2 = contabilidad.enviar(q, r2["maquinas"], 2026, 9, r2["declaracion"]["quickbooks_esperado"], r2["reglas"], r2["detalle"])
     assert e2["cuadra"] and e2["productos"]["cambiados"] >= 1 and e2["actualizados"] == len(q.recibos)
     assert next(it for it in q.items.values() if it["Name"] == contabilidad.nombre_item(un_agua))["Taxable"]
+
+
+def test_al_conectar_un_quickbooks_vacio_se_migran_las_reglas():
+    """Una empresa de QuickBooks nueva queda con los tax codes y cada producto con su marca, sin enviar nada."""
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    _, integ = _integ()
+    almacen.registrar_productos(integ["producto"].unique())
+    otro = next(p for p in integ["producto"].unique() if not productos.es_exento(p, almacen.reglas()))
+    almacen.marcar_producto(otro, "Humberto", exento=True)            # una clasificacion a mano tambien viaja
+    q = Falso()
+    m = contabilidad.preparar(q, almacen.reglas(), almacen.productos())
+    assert set(m["tasas"]) == {"Solo estado", "Houston", "Houston MTA"} and len(q.codes) == 3
+    items = {it["Name"]: it["Taxable"] for it in q.items.values() if it["Type"] == "NonInventory"}
+    agua = {contabilidad.nombre_item(p) for p in integ["producto"].unique() if productos.es_exento(p, almacen.reglas())} | {contabilidad.nombre_item(otro)}
+    assert {n for n, t in items.items() if not t} == agua and m["catalogo"]["agua"] == len(agua)
+    assert {it["Name"] for it in q.items.values() if it["Type"] == "Service"} >= {"Devoluciones a clientes", "Cupones vendidos a empresas"}
+    # conectar otra vez no duplica nada
+    m2 = contabilidad.preparar(q, almacen.reglas(), almacen.productos())
+    assert m2["catalogo"]["creados"] == 0 and len(q.codes) == 3
+
+
+def test_devoluciones_por_defecto_son_los_cupones():
+    _, integ = _integ()
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    assert r["pasos"]["devoluciones_metodo"] == "cupones"
