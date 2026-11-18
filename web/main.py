@@ -78,6 +78,12 @@ def _guardar(datos: dict) -> str:
     return codigo
 
 
+def _cierres_vivos() -> list[dict]:
+    """Los cierres con archivos reales que siguen en memoria (sirven para saber que se vende mas)."""
+    with _CANDADO:
+        return [c for c in CIERRES.values() if not c.get("ejemplo") and "integ" in c]
+
+
 def _cierre(codigo: str) -> dict:
     c = CIERRES.get(codigo)
     if not c:
@@ -208,7 +214,7 @@ def callback(request: Request, code: str = "", realmId: str = "", state: str = "
     # Al conectar se deja la empresa con las reglas de impuestos de EzSnack (tasas, productos, cliente)
     reglas_ok = "ok"
     try:
-        migrado = conta.preparar(qbo_mod.QBO(tokens), cie.reglas(), alm.productos())
+        migrado = conta.preparar(qbo_mod.QBO(tokens), cie.reglas(), _catalogo(), _alias_por_producto())
         alm.anotar(u["nombre"], "Conectó QuickBooks", f"Se migraron las reglas: {len(migrado['tasas'])} códigos de impuesto y "
                    f"{migrado['catalogo']['en_quickbooks']} productos ({migrado['catalogo']['agua']} de agua, no gravables).")
     except Exception:  # noqa: BLE001  la conexion sirve igual; la pagina lo vuelve a intentar
@@ -257,9 +263,18 @@ def estado(request: Request):
 @app.get("/api/config")
 def ver_config(u: dict = CONSULTA):
     R = cie.reglas()
-    catalogo = {p: {**c, "regla_agua": prod.es_exento(p, R)} for p, c in alm.productos().items()}
+    eq = alm.equivalencias()
+    todos = alm.productos()
+    catalogo = {p: {**c, "regla_agua": prod.es_exento(p, R), "otros_nombres": sorted(a for a, d in eq["unidos"].items() if d == p)}
+                for p, c in todos.items() if p not in eq["unidos"]}
+    ventas = {p: 0.0 for p in todos}
+    for cierre_ in _cierres_vivos():
+        for p, v in cierre_["integ"].groupby("producto")["ventas"].sum().items():
+            ventas[p] = ventas.get(p, 0.0) + float(v)
+    sugerencias = prod.sugerir_equivalencias(ventas, eq["unidos"], eq["descartados"])
     return {"reglas": R, "base": alm.reglas_base(), "versiones": alm.versiones_reglas(),
-            "maquinas": alm.maquinas(), "productos": catalogo, "formatos": alm.formatos(),
+            "maquinas": alm.maquinas(), "productos": catalogo, "sugerencias_nombres": sugerencias,
+            "nombres_unidos": eq["lista"], "formatos": alm.formatos(),
             "usuarios": alm.listar_usuarios() if u["rol"] == "admin" else [], "bitacora": alm.bitacora(),
             "almacen": alm.info()}
 
@@ -310,6 +325,24 @@ def clasificar_producto(c: CambioProducto, u: dict = OPERADOR):
         cambios["pagado_habitual"] = c.pagado_habitual
     alm.marcar_producto(c.nombre, u["nombre"], **cambios)
     return {"productos": alm.productos()}
+
+
+class Equivalencia(BaseModel):
+    alias: str
+    producto: str
+    unir: bool = True
+
+
+@app.post("/api/config/equivalencias")
+def decidir_equivalencia(e: Equivalencia, u: dict = OPERADOR):
+    alm.decidir_equivalencia(e.alias, e.producto, e.unir, u["nombre"])
+    return {"ok": True}
+
+
+@app.post("/api/config/equivalencias/separar")
+def separar_equivalencia(e: Equivalencia, u: dict = OPERADOR):
+    alm.separar_equivalencia(e.alias, u["nombre"])
+    return {"ok": True}
 
 
 class Formato(BaseModel):
@@ -445,15 +478,36 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
         "exentos": _registros(res["exentos"].round(2)),
         "pagados": _registros(res["pagados"].round(2)),
         "revisar": res["revisar"],
-        "productos": sorted(c["integ"]["producto"].dropna().unique().tolist(), key=str.lower),
+        "productos": sorted({alm.equivalencias()["unidos"].get(p, p) for p in c["integ"]["producto"].dropna().unique()}, key=str.lower),
         "verificacion": VERIFICACION.get(f"{anio}-{mes:02d}") if c.get("ejemplo") is False else None,
     }
+
+
+def _alias_por_producto() -> dict[str, list[str]]:
+    """producto principal -> los otros nombres con que lo traen los sistemas."""
+    salida: dict[str, list[str]] = {}
+    for alias, producto in alm.equivalencias()["unidos"].items():
+        salida.setdefault(producto, []).append(alias)
+    return salida
+
+
+def _catalogo() -> dict:
+    """El catalogo sin los nombres que ya se unieron a otro producto."""
+    unidos = alm.equivalencias()["unidos"]
+    return {p: c for p, c in alm.productos().items() if p not in unidos}
 
 
 def _calcular(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
     a = cie.Ajustes.de({k: v for k, v in (ajustes or {}).items() if k in ("exentos", "pagados", "cupones_empresa")})
     a.lista_pagados = c["lista_pagados"]
-    a.catalogo = alm.productos()
+    a.catalogo = _catalogo()
+    unidos = alm.equivalencias()["unidos"]
+    if unidos:   # lo que se marco con el nombre de un sistema vale para el producto unido
+        a.exentos = None if a.exentos is None else sorted({unidos.get(x, x) for x in a.exentos})
+        a.pagados = None if a.pagados is None else sorted({unidos.get(x, x) for x in a.pagados})
+    if unidos:   # el mismo producto con otro nombre en otro sistema cuenta como uno solo
+        c = {**c, "integ": c["integ"].assign(
+            nombre_reporte=c["integ"]["producto"], producto=c["integ"]["producto"].map(lambda p: unidos.get(p, p)))}
     return cie.calcular(c["integ"], a, anio, mes)
 
 
@@ -555,7 +609,8 @@ def ver_tasas(request: Request, u: dict = OPERADOR):
     if not tokens:
         raise HTTPException(400, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
-    resp = JSONResponse({**conta.preparar(qbo, cie.reglas(), alm.productos()), "empresa": qbo.info_empresa().get("CompanyName")})
+    resp = JSONResponse({**conta.preparar(qbo, cie.reglas(), _catalogo(), _alias_por_producto()),
+                         "empresa": qbo.info_empresa().get("CompanyName")})
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp
@@ -573,7 +628,7 @@ def enviar_quickbooks(request: Request, codigo: str, p: Pedido, u: dict = OPERAD
         raise HTTPException(400, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
     envio = conta.enviar(qbo, res["maquinas"], p.anio, p.mes, res["declaracion"]["quickbooks_esperado"], res["reglas"],
-                         res["detalle"])
+                         res["detalle"], _alias_por_producto())
     if not c.get("ejemplo"):    # el cierre enviado queda en el historial con lo que respondio QuickBooks
         try:
             envio["cierre"] = alm.guardar_cierre(p.anio, p.mes, res, _archivos(c), u["nombre"], {

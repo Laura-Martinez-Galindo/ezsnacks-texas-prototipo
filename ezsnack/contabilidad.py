@@ -154,7 +154,8 @@ def gravables_del_catalogo(catalogo: dict, R: dict) -> dict[str, bool]:
     return {p: not (c["exento"] if c.get("exento") is not None else es_exento(p, R)) for p, c in catalogo.items()}
 
 
-def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None) -> dict:
+def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None,
+             alias: dict[str, list[str]] | None = None) -> dict:
     """Migra las reglas de impuestos de EzSnack a la empresa de QuickBooks. Se llama al conectar.
 
     Crea lo que falte y corrige lo que no coincida, sin tocar transacciones: la agencia (Texas
@@ -175,7 +176,7 @@ def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None) -> d
     catalogo_qbo = {"en_quickbooks": 0, "creados": 0, "cambiados": 0, "agua": 0, "errores": []}
     if catalogo:
         gravables = gravables_del_catalogo(catalogo, R or reglas())
-        ids, sinc = sincronizar_productos(qbo, gravables, cuenta["Id"])
+        ids, sinc = sincronizar_productos(qbo, gravables, cuenta["Id"], alias)
         catalogo_qbo = {**sinc, "en_quickbooks": len(set(ids.values())), "agua": sum(1 for v in gravables.values() if not v)}
     return {"tasas": codigos, "detalle": resumen, "productos": productos, "catalogo": catalogo_qbo,
             "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
@@ -186,21 +187,40 @@ def nombre_item(producto: str) -> str:
     return " ".join(str(producto).replace(":", " -").split())[:100] or "Sin nombre"
 
 
-def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str) -> tuple[dict[str, str], dict]:
+TIPOS_PRODUCTO = ("NonInventory", "Inventory", "Service")
+
+
+def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
+                          alias: dict[str, list[str]] | None = None) -> tuple[dict[str, str], dict]:
     """Deja en QuickBooks un item por producto, con la marca de gravable que dicen las reglas.
 
-    gravables: producto -> True si paga impuesto (False para el agua). Devuelve el id del item de
-    cada producto y cuantos se crearon y cuantos cambiaron de marca.
+    gravables: producto -> True si paga impuesto (False para el agua).
+    alias: producto -> otros nombres con que lo traen los sistemas de ventas.
+
+    Si la empresa ya tenia el producto en QuickBooks, se usa ese item (sea de inventario, de
+    servicio o no inventariable) y solo se le corrige la marca de gravable; no se crea otro. Se
+    busca por el nombre, por los otros nombres del producto y, si nada coincide, por un nombre
+    parecido que sea el mismo producto (por ejemplo "Ozarka Water 20 oz" y "Ozarka water 20oz").
     """
-    existentes = {str(it.get("Name", "")).lower(): it for it in qbo.query("select * from Item where Type = 'NonInventory'")}
+    from .productos import mismo_producto
+    alias = alias or {}
+    todos = [it for it in qbo.query("select * from Item") if it.get("Type") in TIPOS_PRODUCTO]
+    propios = {nombre for nombre, _ in ITEMS.values()}
+    existentes = {str(it.get("Name", "")).lower(): it for it in todos if it.get("Name") not in propios}
     grupos: dict[str, list[str]] = {}
     for producto in gravables:   # QuickBooks no distingue mayusculas: "Ozarka water" y "Ozarka Water" son un item
         grupos.setdefault(nombre_item(producto).lower(), []).append(producto)
-    ids, pedidos, de_pedido = {}, [], {}
-    nuevos = cambiados = 0
+    usados = set()
+    ids, pedidos, de_pedido, reutilizados = {}, [], {}, []
+    nuevos = cambiados = existian = 0
     for clave, productos in grupos.items():
         gravable = all(gravables[p] for p in productos)   # si uno de los nombres es agua, el item es agua
-        it = existentes.get(clave)
+        nombres = [clave] + [nombre_item(a).lower() for p in productos for a in alias.get(p, [])]
+        it = next((existentes[n] for n in nombres if n in existentes and existentes[n]["Id"] not in usados), None)
+        if it is None:
+            parecidos = [x for n, x in existentes.items() if x["Id"] not in usados and mismo_producto(productos[0], x["Name"])]
+            if len(parecidos) == 1:
+                it = parecidos[0]
         if it is None:
             bid = f"n{len(pedidos)}"
             pedidos.append({"bId": bid, "operation": "create", "Item": {
@@ -209,7 +229,11 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str) -> 
             de_pedido[bid] = productos
             nuevos += 1
             continue
+        usados.add(it["Id"])
+        existian += 1
         ids.update({p: it["Id"] for p in productos})
+        if str(it.get("Name", "")).lower() != clave:
+            reutilizados.append({"producto": productos[0], "item": it.get("Name")})
         if bool(it.get("Taxable")) != gravable:
             pedidos.append({"bId": f"c{len(pedidos)}", "operation": "update", "Item": {
                 "Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable, "sparse": True}})
@@ -224,7 +248,8 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str) -> 
             else:
                 err = (r.get("Fault", {}).get("Error") or [{}])[0]
                 errores.append(f"{err.get('Message', '')} {err.get('Detail', '')}".strip()[:200])
-    return ids, {"creados": nuevos, "cambiados": cambiados, "errores": errores}
+    return ids, {"creados": nuevos, "cambiados": cambiados, "errores": errores, "ya_existian": existian,
+                 "reutilizados": reutilizados}
 
 
 def _recibo_productos(m, filas: pd.DataFrame, cliente: str, items: dict, prods: dict, codigos: dict,
@@ -293,7 +318,7 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
 
 
 def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list[dict] | None = None,
-           R: dict | None = None, detalle: pd.DataFrame | None = None) -> dict:
+           R: dict | None = None, detalle: pd.DataFrame | None = None, alias: dict[str, list[str]] | None = None) -> dict:
     cliente, items, codigos = _preparar(qbo, R)
     # Productos: cada uno es un item de QuickBooks y el agua queda marcada como no gravable alli
     prods, sinc, por_maquina = {}, {"creados": 0, "cambiados": 0, "errores": []}, {}
@@ -306,7 +331,7 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
              .agg(venta=("venta", "sum"), cantidad=("cantidad", "sum"), exento=("exento", "first"),
                   pagado=("impuesto_pagado", "first")).reset_index())
         prods, sinc = sincronizar_productos(qbo, {p: not bool(e) for p, e in
-                                                   g.groupby("producto")["exento"].first().items()}, cuenta)
+                                                   g.groupby("producto")["exento"].first().items()}, cuenta, alias)
         por_maquina = {k: v for k, v in g.groupby("id_maquina")}
     fecha = date(anio, mes, monthrange(anio, mes)[1]).isoformat()
     prefijo = f"V{anio % 100:02d}{mes:02d}-"

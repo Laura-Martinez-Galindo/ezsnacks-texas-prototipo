@@ -5,6 +5,7 @@
     reglas            versiones de las reglas del cierre, cada una con el mes desde el que aplica
     maquinas          la lista de maquinas (el vendor list), editable
     productos         la clasificacion que el gerente ya decidio para cada producto
+    equivalencias     nombres distintos del mismo producto en los distintos sistemas de ventas
     formatos          los sistemas de ventas registrados y como se leen sus columnas
     cierres           cada cierre guardado, con las reglas que tenia en ese momento
     cierre_maquinas   el detalle por maquina de cada cierre (un renglon = un recibo de venta)
@@ -72,6 +73,14 @@ formatos_t = sa.Table("formatos", meta,
                       sa.Column("nombre", sa.String(24), nullable=False), sa.Column("mapeo", sa.JSON, nullable=False),
                       sa.Column("creado_por", sa.String(80)), sa.Column("creado", sa.String(32)),
                       sa.UniqueConstraint("empresa_id", "nombre"))
+equivalencias_t = sa.Table("equivalencias", meta,
+                           sa.Column("id", sa.Integer, primary_key=True),
+                           sa.Column("empresa_id", sa.Integer, sa.ForeignKey("empresas.id"), nullable=False),
+                           sa.Column("alias", sa.String(200), nullable=False),        # como lo llama un sistema
+                           sa.Column("producto", sa.String(200), nullable=False),     # el nombre principal
+                           sa.Column("estado", sa.String(10), nullable=False),        # unido o distinto
+                           sa.Column("por", sa.String(80)), sa.Column("fecha", sa.String(32)),
+                           sa.UniqueConstraint("empresa_id", "alias", "producto"))
 cierres_t = sa.Table("cierres", meta,
                      sa.Column("id", sa.Integer, primary_key=True),
                      sa.Column("empresa_id", sa.Integer, sa.ForeignKey("empresas.id"), nullable=False),
@@ -350,6 +359,45 @@ def registrar_productos(nombres) -> int:
             c.execute(productos_t.insert(), [{"empresa_id": EMPRESA, "nombre": n, "exento": None, "pagado_habitual": False,
                                               "actualizado_por": "Reportes de ventas", "actualizado": _ahora()} for n in nuevos])
     return len(nuevos)
+
+
+def equivalencias() -> dict:
+    """{"unidos": {alias: producto}, "descartados": {frozenset((a, b))}}"""
+    with motor().connect() as c:
+        filas = c.execute(sa.select(equivalencias_t).where(equivalencias_t.c.empresa_id == EMPRESA)).mappings().all()
+    unidos = {f["alias"]: f["producto"] for f in filas if f["estado"] == "unido"}
+    # si "A" se unio a "B" y luego "B" a "C", "A" va directo a "C"
+    for alias in list(unidos):
+        vistos, destino = {alias}, unidos[alias]
+        while destino in unidos and destino not in vistos:
+            vistos.add(destino)
+            destino = unidos[destino]
+        unidos[alias] = destino
+    return {"unidos": unidos, "lista": [dict(f) for f in filas if f["estado"] == "unido"],
+            "descartados": {frozenset((f["alias"], f["producto"])) for f in filas if f["estado"] == "distinto"}}
+
+
+def decidir_equivalencia(alias: str, producto: str, unir: bool, usuario: str) -> None:
+    alias, producto = str(alias).strip()[:200], str(producto).strip()[:200]
+    if not alias or not producto or alias == producto:
+        raise ValueError("Indique dos nombres distintos.")
+    if unir and equivalencias()["unidos"].get(producto) == alias:
+        raise ValueError(f"“{producto}” ya está unido a “{alias}”.")
+    with motor().begin() as c:
+        c.execute(equivalencias_t.delete().where((equivalencias_t.c.empresa_id == EMPRESA) & (
+            ((equivalencias_t.c.alias == alias) & (equivalencias_t.c.producto == producto))
+            | ((equivalencias_t.c.alias == producto) & (equivalencias_t.c.producto == alias))
+            | ((equivalencias_t.c.alias == alias) & (equivalencias_t.c.estado == "unido") & sa.literal(unir)))))
+        c.execute(equivalencias_t.insert().values(empresa_id=EMPRESA, alias=alias, producto=producto,
+                                                  estado="unido" if unir else "distinto", por=usuario, fecha=_ahora()))
+    anotar(usuario, "Unió dos nombres de producto" if unir else "Marcó dos productos como distintos", f"{alias} → {producto}")
+
+
+def separar_equivalencia(alias: str, usuario: str) -> None:
+    with motor().begin() as c:
+        c.execute(equivalencias_t.delete().where((equivalencias_t.c.empresa_id == EMPRESA) & (equivalencias_t.c.alias == alias)
+                                                 & (equivalencias_t.c.estado == "unido")))
+    anotar(usuario, "Separó un nombre de producto", alias)
 
 
 # ---------------- sistemas de ventas ----------------

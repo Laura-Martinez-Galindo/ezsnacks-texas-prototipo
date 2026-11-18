@@ -186,3 +186,52 @@ def test_devoluciones_por_defecto_son_los_cupones():
     _, integ = _integ()
     r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
     assert r["pasos"]["devoluciones_metodo"] == "cupones"
+
+
+
+def test_quickbooks_que_ya_tenia_los_productos_no_los_duplica():
+    """Si la empresa ya tenia el producto (de inventario, o con el nombre escrito distinto) se usa ese item."""
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    _, integ = _integ()
+    agua = next(p for p in integ["producto"].unique() if productos.es_exento(p, almacen.reglas()))
+    gravable = next(p for p in integ["producto"].unique() if not productos.es_exento(p, almacen.reglas()))
+    q = Falso()
+    # la empresa ya los tenia: el agua como inventario y gravable (mal), el otro con otro nombre
+    viejo_agua = q.crear("Item", {"Name": agua.upper(), "Type": "Inventory", "Taxable": True})
+    viejo = q.crear("Item", {"Name": gravable + " Can", "Type": "Service", "Taxable": True})
+    almacen.registrar_productos(integ["producto"].unique())
+    m = contabilidad.preparar(q, almacen.reglas(), almacen.productos())
+    assert q.items[viejo_agua["Id"]]["Taxable"] is False            # se corrigio la marca, no se creo otro
+    assert not [i for i in q.items.values() if i["Name"].lower() == agua.lower() and i["Id"] != viejo_agua["Id"]]
+    assert not [i for i in q.items.values() if i["Name"] == contabilidad.nombre_item(gravable)]
+    assert {"producto": gravable, "item": gravable + " Can"} in m["catalogo"]["reutilizados"]
+    assert m["catalogo"]["ya_existian"] >= 2
+
+
+def test_nombres_distintos_del_mismo_producto():
+    assert productos.mismo_producto("12oz - Coke Classic Can", "Coke Classic - 12 oz. can")
+    assert productos.mismo_producto("Ozarka Water 20 oz", "Ozarka water 20oz")
+    assert not productos.mismo_producto("Sprite 12 oz.", "Sprite Zero 12 oz")       # Zero es otro producto
+    assert not productos.mismo_producto("Dr Pepper 16.9oz", "Dr. Pepper - 12 oz")    # otro tamano
+    s = productos.sugerir_equivalencias({"Coke": 10, "Coke 12 oz": 5, "Coke 16.9 oz": 4, "Ozarka water 20oz": 1, "Ozarka Water 20 oz": 9})
+    assert {"alias": "Ozarka water 20oz", "producto": "Ozarka Water 20 oz"} in [{k: x[k] for k in ("alias", "producto")} for x in s]
+    assert not [x for x in s if "Coke" in (x["alias"], x["producto"])]       # "Coke" sin tamano es ambiguo
+
+
+def test_unir_nombres_cuenta_como_un_producto():
+    c = TestClient(app)
+    reportes = [("reportes", (p.name, p.read_bytes())) for p in sorted(D.glob("reporte_*.xlsx"))]
+    with open(D / "vendor_list_EJEMPLO.xlsx", "rb") as f:
+        d = c.post("/api/cierre/archivos?anio=2026&mes=9", files=[("maquinas", ("v.xlsx", f.read()))] + reportes).json()
+    a, b = d["productos"][0], d["productos"][1]
+    antes = d["pasos"]["gravable"]["total"]
+    assert c.post("/api/config/equivalencias", json={"alias": a, "producto": b}).status_code == 200
+    r = c.post(f"/api/cierre/{d['codigo']}/calcular", json={"anio": 2026, "mes": 9}).json()
+    assert a not in r["productos"] and b in r["productos"]
+    assert r["pasos"]["gravable"]["total"] == pytest.approx(antes, abs=0.01)          # unir no cambia el impuesto
+    cfg = c.get("/api/config").json()
+    assert a not in cfg["productos"] and a in cfg["productos"][b]["otros_nombres"]
+    c.post("/api/config/equivalencias/separar", json={"alias": a, "producto": b})
+    assert a in c.get("/api/config").json()["productos"]
