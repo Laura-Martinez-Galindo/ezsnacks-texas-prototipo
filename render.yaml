@@ -1,3 +1,9 @@
+# La base de datos guarda la configuracion, los usuarios y el historial de cierres.
+# El plan gratis de Render vence a los 30 dias de creada; para dejarla fija hay que pasarla a un plan pago.
+databases:
+  - name: ezsnack-db
+    plan: free
+
 services:
   - type: web
     name: ezsnack-impuestos
@@ -13,6 +19,10 @@ services:
         value: sandbox
       - key: SESSION_SECRET
         generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ezsnack-db
+          property: connectionString
       - key: QBO_CLIENT_ID
         sync: false
       - key: QBO_CLIENT_SECRET
