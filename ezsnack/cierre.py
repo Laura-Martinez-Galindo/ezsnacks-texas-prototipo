@@ -22,13 +22,13 @@ QuickBooks no puede dar una base distinta a la de la aplicacion.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
+from . import almacen
 from . import productos as prod
 from .lectores import Lectura
 
@@ -36,8 +36,9 @@ CONFIG = Path(__file__).resolve().parents[1] / "config"
 SUMAS = ["cantidad", "efectivo", "tarjeta", "cupones", "cuenta", "prepago", "otros"]
 
 
-def reglas() -> dict:
-    return json.loads((CONFIG / "reglas.json").read_text(encoding="utf-8"))
+def reglas(periodo: str | None = None) -> dict:
+    """Las reglas de la empresa que aplican a un mes ("2026-09"). Salen de la base de datos."""
+    return almacen.reglas(periodo)
 
 
 @dataclass
@@ -49,6 +50,7 @@ class Ajustes:
     cupones_empresa: list[str] | None = None       # maquinas cuyos cupones compro una empresa
     cupones_empresa_minimo: float | None = None    # desde cuanto se considera venta a empresa
     devoluciones: dict | None = None               # {"metodo": "cupones" | "porcentaje", "porcentaje": 3}
+    catalogo: dict | None = None                   # producto -> {"exento": bool | None, "pagado_habitual": bool}
 
     @classmethod
     def de(cls, d: dict | None) -> "Ajustes":
@@ -116,7 +118,7 @@ def impuesto_esperado(maquinas: pd.DataFrame, R: dict) -> list[dict]:
 
 
 def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
-    R = reglas()
+    R = reglas(f"{anio}-{mes:02d}")
     if a.cupones_empresa_minimo is not None:
         R["cupones_empresa_minimo"] = max(float(a.cupones_empresa_minimo), 0.0)
     dev = {"metodo": "cupones", "porcentaje": 3.0, **(R.get("devoluciones") or {}), **(a.devoluciones or {})}
@@ -133,10 +135,18 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     vendidos = (integ.groupby("producto", as_index=False).agg(ventas=("ventas", "sum"), cantidad=("cantidad", "sum"))
                 .sort_values("ventas", ascending=False))
 
-    propuesta = [p for p in vendidos["producto"] if prod.es_exento(p)]
+    # Lo que el gerente ya clasifico manda sobre la regla del agua
+    cat = a.catalogo or {}
+    guardado = lambda p: cat.get(p, {}).get("exento")  # noqa: E731
+    propuesta = [p for p in vendidos["producto"] if (guardado(p) if guardado(p) is not None else prod.es_exento(p, R))]
     exentos = set(propuesta if a.exentos is None else a.exentos)
-    cruce = (prod.buscar_pagados(a.lista_pagados, vendidos) if a.lista_pagados
-             else pd.DataFrame(columns=["buscado", "producto", "ventas", "estado"]))
+    if a.lista_pagados:
+        cruce = prod.buscar_pagados(a.lista_pagados, vendidos)
+    else:   # sin lista este mes: se proponen los que habitualmente se compran por fuera
+        habituales = vendidos[vendidos["producto"].map(lambda p: bool(cat.get(p, {}).get("pagado_habitual")))]
+        cruce = pd.DataFrame({"buscado": "Habitual", "producto": habituales["producto"],
+                              "ventas": habituales["ventas"].round(2), "estado": "seguro"},
+                             columns=["buscado", "producto", "ventas", "estado"])
     pagados = set(cruce.loc[cruce["estado"] == "seguro", "producto"]) if a.pagados is None else set(a.pagados)
     pagados -= exentos  # lo exento ya no paga impuesto: no se descuenta dos veces
 
@@ -148,8 +158,9 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
     por_maquina = d.groupby("id_maquina")["cupones"].sum()
     if a.cupones_empresa is not None:
         empresas = {m for m in a.cupones_empresa if m in por_maquina.index}
-    else:
-        empresas = set(por_maquina[por_maquina >= R["cupones_empresa_minimo"]].index)
+    else:   # las maquinas que la empresa marco en sus reglas, mas las que pasan del monto minimo
+        fijas = {str(m).strip() for m in R.get("cupones_empresas", [])} & set(por_maquina.index)
+        empresas = fijas | set(por_maquina[por_maquina >= R["cupones_empresa_minimo"]].index)
     d["cupon_empresa"] = d["id_maquina"].isin(empresas) & (d["cupones"] > 0)
     cupones = [{"id_maquina": m, "maquina": d.loc[d["id_maquina"] == m, "maquina"].iloc[0],
                 "locacion": d.loc[d["id_maquina"] == m, "locacion"].iloc[0],

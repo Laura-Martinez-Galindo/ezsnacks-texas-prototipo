@@ -62,8 +62,8 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     listas = {
         "Water products (exempt)": res["lista_exentos"],
         "Products bought with sales tax paid": res["lista_pagados"],
-        "Houston machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston", "maquina"]),
-        "Houston MTA machines": sorted(maquinas.loc[maquinas["jurisdiccion"] == "Houston MTA", "maquina"]),
+        "Machines with local tax": sorted(maquinas.loc[maquinas["jurisdiccion"] != "", "maquina"]),
+        "Machines with state tax only": sorted(maquinas.loc[maquinas["jurisdiccion"] == "", "maquina"]),
         "Coupons sold to companies": sorted({c["maquina"] for c in res["cupones"] if c["de_empresa"]}),
         "Coupons refunded to customers": sorted({c["maquina"] for c in res["cupones"] if not c["de_empresa"]}),
     }
@@ -143,10 +143,10 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
                               float(pm[clave].sum()) if clave else float(d["cupones"].sum()))
     wm_.freeze_panes(1, 2)
 
-    mta_ciudades = " ".join(res["reglas"]["jurisdicciones"]["Houston MTA"]["ciudades"])
+    J = res["reglas"]["jurisdicciones"]
     s = n + 2          # fila de Subtotal (numeracion de Excel)
     v = s + 2          # Sales (cash + credit)
-    ce, t, dv, m, w, g, wm, tp, h, hw, hp, hn, mta, mw, mp, mn = (v + i for i in range(1, 17))
+    ce, t, dv, m, w, g, wm, tp = (v + i for i in range(1, 9))
     ws.write(f"C{s}", "Subtotal")
     ws.write(f"D{s}", " ", sub)
     ws.write(f"E{s}", "Subtotal", sub)
@@ -191,16 +191,17 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     ws.merge_range(f"I{g}:L{g}", "Removing Sales tax already paid", centro)
     fila(wm, "Walmart buys (Taxes paid)", suma("M"), suma("N"), "walmart")
     fila(tp, "Taxes Paid (Walmart buys)", f"=F{wm}*0.0625", f"=G{wm}*0.0625", "impuesto_walmart", amar, amarn)
-    fila(h, "Houston sales minus returns to customer", de("Houston", "I"), de("Houston", "J"), "bruto_Houston")
-    fila(hw, "Houston water", de("Houston", "K"), de("Houston", "L"), "agua_Houston")
-    fila(hp, "Houston Walmart buys", de("Houston", "M"), de("Houston", "N"), "pagadas_Houston")
-    fila(hn, "Houston Taxable sales", f"=F{h}-F{hw}-F{hp}", f"=G{h}-G{hw}-G{hp}", "base_Houston", verde_i, verden)
-    fila(mta, f"Houston MTA ({mta_ciudades}) sales minus returns", de("Houston MTA", "I"), de("Houston MTA", "J"),
-         "bruto_Houston MTA")
-    fila(mw, "Houston MTA water", de("Houston MTA", "K"), de("Houston MTA", "L"), "agua_Houston MTA")
-    fila(mp, "Houston MTA Walmart buys", de("Houston MTA", "M"), de("Houston MTA", "N"), "pagadas_Houston MTA")
-    fila(mn, "Houston MTA Taxable sales", f"=F{mta}-F{mw}-F{mp}", f"=G{mta}-G{mw}-G{mp}", "base_Houston MTA",
-         verde_i, verden)
+    # cuatro renglones por cada jurisdiccion local que tenga la empresa en sus reglas
+    r0 = tp + 1
+    for nombre, j in J.items():
+        ciudades = " ".join(j["ciudades"])
+        titulo = nombre if nombre.lower() == ciudades.lower() else f"{nombre} ({ciudades})"
+        fila(r0, f"{titulo} sales minus returns to customer", de(nombre, "I"), de(nombre, "J"), f"bruto_{nombre}")
+        fila(r0 + 1, f"{nombre} water", de(nombre, "K"), de(nombre, "L"), f"agua_{nombre}")
+        fila(r0 + 2, f"{nombre} Walmart buys", de(nombre, "M"), de(nombre, "N"), f"pagadas_{nombre}")
+        fila(r0 + 3, f"{nombre} Taxable sales ({j['nombre_comptroller']})", f"=F{r0}-F{r0 + 1}-F{r0 + 2}",
+             f"=G{r0}-G{r0 + 1}-G{r0 + 2}", f"base_{nombre}", verde_i, verden)
+        r0 += 4
 
     # ---------- Read Me ----------
     rm = wb.add_worksheet("Read Me")
