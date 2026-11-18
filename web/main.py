@@ -568,7 +568,8 @@ def enviar_quickbooks(request: Request, codigo: str, p: Pedido, u: dict = OPERAD
     if not tokens:
         raise HTTPException(400, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
-    envio = conta.enviar(qbo, res["maquinas"], p.anio, p.mes, res["declaracion"]["quickbooks_esperado"], res["reglas"])
+    envio = conta.enviar(qbo, res["maquinas"], p.anio, p.mes, res["declaracion"]["quickbooks_esperado"], res["reglas"],
+                         res["detalle"])
     if not c.get("ejemplo"):    # el cierre enviado queda en el historial con lo que respondio QuickBooks
         try:
             envio["cierre"] = alm.guardar_cierre(p.anio, p.mes, res, _archivos(c), u["nombre"], {

@@ -566,7 +566,10 @@ function pintarEnvio() {
   const comp = c ? ` El Comptroller redondea las bases a dólares enteros y calcula ${dinero(c.impuesto_total)}; la diferencia de centavos con QuickBooks es ese redondeo.` : "";
   $("#nota-qbo").textContent = `${r.creados} recibos creados y ${r.actualizados} actualizados. `
     + (r.cuadre?.length ? (r.cuadra ? "QuickBooks devolvió las mismas bases y el mismo impuesto que calculó la aplicación." : "Hay diferencias entre QuickBooks y la aplicación: revise las filas marcadas.") : "")
-    + ` QuickBooks recibió ${dinero(r.gravable)} como taxable sales y ${dinero(r.exento)} como nontaxable sales.` + comp;
+    + ` QuickBooks recibió ${dinero(r.gravable)} como taxable sales y ${dinero(r.exento)} como nontaxable sales.` + comp
+    + (r.productos?.en_quickbooks ? ` Las reglas quedaron en QuickBooks: ${entero(r.productos.en_quickbooks)} productos como items, el agua marcada como no gravable`
+      + (r.productos.creados || r.productos.cambiados ? ` (${r.productos.creados} creados y ${r.productos.cambiados} con la marca corregida en este envío)` : "")
+      + ", y las devoluciones como un renglón de cada recibo." : "");
 }
 
 /* ---------- tiquete ---------- */
