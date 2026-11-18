@@ -85,6 +85,10 @@ Al conectar QuickBooks, la aplicación deja la empresa configurada sin que nadie
 
 Después de enviar el mes, la página muestra tasa por tasa la base y el impuesto de la aplicación al lado de los que devolvió QuickBooks, y marca si son iguales. QuickBooks redondea el impuesto recibo por recibo; el Comptroller redondea las bases a dólares enteros. Por eso el valor del Comptroller puede diferir en centavos, y la página muestra los dos.
 
+## Las reglas dentro de QuickBooks
+
+Las reglas no quedan solo en la aplicación. Al enviar el mes, cada producto vendido se crea en QuickBooks como un item, y el agua queda con la marca de no gravable allí mismo. Cada recibo trae un renglón por producto; los comprados con impuesto ya pagado van ese mes con el código NON, las devoluciones son un renglón negativo y los cupones que compran las empresas un renglón gravable. Las jurisdicciones son los tax codes. Así QuickBooks decide con sus propios items y códigos qué es gravable y cuánto impuesto cobra, y si alguien registra una venta a mano en QuickBooks, el agua ya sale sin impuesto. Si una regla cambia, el siguiente envío corrige la marca del item.
+
 ## Devoluciones a clientes
 
 Es una regla que se cambia en Configuración. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan. Por defecto la aplicación sigue el proceso del gerente: 3 % fijo de devoluciones y agua es todo producto cuyo nombre diga water, también el endulzado. Las dos cosas se cambian en Configuración.

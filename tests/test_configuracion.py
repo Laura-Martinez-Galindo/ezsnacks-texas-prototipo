@@ -138,3 +138,24 @@ def test_sistema_registrado_en_el_servidor(tmp_path):
     with open(D / "vendor_list_EJEMPLO.xlsx", "rb") as f:
         d = c.post("/api/cierre/archivos?anio=2026&mes=9", files=[("maquinas", ("v.xlsx", f.read())), ("reportes", ("otro.xlsx", ruta.read_bytes()))]).json()
     assert d["archivos"][0]["fuente"] == "Cantaloupe" and d["archivos"][0]["registrado"]
+
+
+def test_las_reglas_quedan_en_quickbooks_y_cuadra():
+    """Cada producto es un item; el agua no es gravable en QuickBooks; las devoluciones son un renglon."""
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    lecturas, integ = _integ()
+    r = cierre.calcular(integ, cierre.Ajustes(lista_pagados=productos.leer_lista(D / "compras_impuesto_pagado_EJEMPLO.xlsx")), 2026, 9)
+    q = Falso()
+    e = contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], r["reglas"], r["detalle"])
+    assert e["cuadra"] and not e["errores"] and e["productos"]["recibos_resumidos"] == 0
+    agua = {it["Name"] for it in q.items.values() if it["Type"] == "NonInventory" and not it["Taxable"]}
+    assert agua == {contabilidad.nombre_item(p) for p in r["lista_exentos"]}
+    assert any(l["Amount"] < 0 for rc in q.recibos.values() for l in rc["Line"])   # devoluciones
+    # si una regla cambia (un producto deja de ser agua) QuickBooks se actualiza al reenviar
+    un_agua = r["lista_exentos"][0]
+    r2 = cierre.calcular(integ, cierre.Ajustes(exentos=r["lista_exentos"][1:]), 2026, 9)
+    e2 = contabilidad.enviar(q, r2["maquinas"], 2026, 9, r2["declaracion"]["quickbooks_esperado"], r2["reglas"], r2["detalle"])
+    assert e2["cuadra"] and e2["productos"]["cambiados"] >= 1 and e2["actualizados"] == len(q.recibos)
+    assert next(it for it in q.items.values() if it["Name"] == contabilidad.nombre_item(un_agua))["Taxable"]

@@ -13,9 +13,17 @@ dejar que el impuesto automatico decida por la direccion:
     EzSnack Houston MTA   6.25 % estado + 1 % MTA
     EzSnack solo estado   6.25 % estado
 
-Por cada maquina se crea un recibo de venta con tres renglones: ventas gravables, agua (exenta) y
-productos comprados con impuesto ya pagado (exentos, porque ese impuesto ya se pago en la caja).
-Si el mes ya se habia enviado, los recibos se actualizan en vez de duplicarse.
+Las reglas del cierre quedan dentro de QuickBooks, no solo en la aplicacion:
+
+    jurisdicciones   cada una es un tax code con la tasa del estado y la local
+    agua             cada producto vendido es un item de QuickBooks; el agua queda con Taxable = false
+    compras pagadas  el renglon de ese producto va con el codigo NON ese mes
+    devoluciones     un renglon negativo "Devoluciones a clientes" (el 3 % o los cupones del mes)
+    cupones          los que compran las empresas, un renglon gravable "Cupones vendidos a empresas"
+
+Por cada maquina se crea un recibo de venta con un renglon por producto. QuickBooks decide con sus
+items y sus tax codes que es gravable y cuanto impuesto cobra. Si el mes ya se habia enviado, los
+recibos se actualizan en vez de duplicarse.
 """
 from __future__ import annotations
 
@@ -35,8 +43,11 @@ ITEMS = {
     "gravable": ("Ventas gravables", True),
     "exentas": ("Agua (exenta)", False),
     "pagadas": ("Comprado con impuesto ya pagado", False),
+    "devoluciones": ("Devoluciones a clientes", True),
+    "cupones_empresa": ("Cupones vendidos a empresas", True),
 }
 LOTE = 25
+LOTE_ITEMS = 30
 
 
 def _esc(t: str) -> str:
@@ -158,9 +169,91 @@ def preparar(qbo: QBO, R: dict | None = None) -> dict:
             "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
 
 
-def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fecha: str) -> dict | None:
+def nombre_item(producto: str) -> str:
+    """QuickBooks usa ':' para subproductos y no deja nombres de mas de 100 caracteres."""
+    return " ".join(str(producto).replace(":", " -").split())[:100] or "Sin nombre"
+
+
+def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str) -> tuple[dict[str, str], dict]:
+    """Deja en QuickBooks un item por producto, con la marca de gravable que dicen las reglas.
+
+    gravables: producto -> True si paga impuesto (False para el agua). Devuelve el id del item de
+    cada producto y cuantos se crearon y cuantos cambiaron de marca.
+    """
+    existentes = {str(it.get("Name", "")).lower(): it for it in qbo.query("select * from Item where Type = 'NonInventory'")}
+    grupos: dict[str, list[str]] = {}
+    for producto in gravables:   # QuickBooks no distingue mayusculas: "Ozarka water" y "Ozarka Water" son un item
+        grupos.setdefault(nombre_item(producto).lower(), []).append(producto)
+    ids, pedidos, de_pedido = {}, [], {}
+    nuevos = cambiados = 0
+    for clave, productos in grupos.items():
+        gravable = all(gravables[p] for p in productos)   # si uno de los nombres es agua, el item es agua
+        it = existentes.get(clave)
+        if it is None:
+            bid = f"n{len(pedidos)}"
+            pedidos.append({"bId": bid, "operation": "create", "Item": {
+                "Name": nombre_item(productos[0]), "Type": "NonInventory", "Taxable": gravable,
+                "Description": "Producto de máquina expendedora", "IncomeAccountRef": {"value": cuenta}}})
+            de_pedido[bid] = productos
+            nuevos += 1
+            continue
+        ids.update({p: it["Id"] for p in productos})
+        if bool(it.get("Taxable")) != gravable:
+            pedidos.append({"bId": f"c{len(pedidos)}", "operation": "update", "Item": {
+                "Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable, "sparse": True}})
+            cambiados += 1
+    errores = []
+    for i in range(0, len(pedidos), LOTE_ITEMS):
+        resp = qbo._peticion("POST", "batch", json_body={"BatchItemRequest": pedidos[i:i + LOTE_ITEMS]})
+        for r in resp.get("BatchItemResponse", []):
+            if "Item" in r:
+                for p in de_pedido.get(r["bId"], []):
+                    ids[p] = r["Item"]["Id"]
+            else:
+                err = (r.get("Fault", {}).get("Error") or [{}])[0]
+                errores.append(f"{err.get('Message', '')} {err.get('Detail', '')}".strip()[:200])
+    return ids, {"creados": nuevos, "cambiados": cambiados, "errores": errores}
+
+
+def _recibo_productos(m, filas: pd.DataFrame, cliente: str, items: dict, prods: dict, codigos: dict,
+                      anio: int, mes: int, fecha: str) -> dict | None:
+    """Un renglon por producto. Devuelve None si no cuadra con la maquina, para usar el resumido."""
+    if float(m["gravable"]) <= 0 or filas.empty:
+        return None
     lineas = []
-    for clave, (nombre, gravable) in ITEMS.items():
+
+    def linea(item: str, valor: float, gravable: bool, texto: str) -> None:
+        valor = round(valor, 2)
+        if abs(valor) < 0.005:
+            return
+        lineas.append({"DetailType": "SalesItemLineDetail", "Amount": valor, "Description": texto[:4000],
+                       "SalesItemLineDetail": {"ItemRef": {"value": item}, "Qty": 1, "UnitPrice": valor,
+                                               "TaxCodeRef": {"value": "TAX" if gravable else "NON"}}})
+
+    for f in filas.itertuples(index=False):
+        if f.producto not in prods:
+            return None
+        texto = f"{int(f.cantidad)} unidades" if f.cantidad else ""
+        if f.pagado and not f.exento:
+            texto = (texto + ". Comprado con impuesto ya pagado").strip(". ")
+        linea(prods[f.producto], float(f.venta), not (f.exento or f.pagado), texto)
+    linea(items["cupones_empresa"], float(m["cup_emp"]), True, f"Cupones vendidos a empresas {mes:02d}/{anio}")
+    devol = round(float(m["dev_e"]) + float(m["dev_t"]), 2)
+    gravado = round(sum(l["Amount"] for l in lineas if l["SalesItemLineDetail"]["TaxCodeRef"]["value"] == "TAX") - devol, 2)
+    ajuste = round(float(m["gravable"]) - gravado, 2)   # centavos de redondeo entre producto y maquina
+    if abs(ajuste) > 0.05:
+        return None
+    linea(items["devoluciones"], -(devol - ajuste), True, f"Devoluciones a clientes {mes:02d}/{anio}")
+    if not lineas:
+        return None
+    return lineas
+
+
+def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fecha: str,
+            lineas: list | None = None) -> dict | None:
+    resumido = lineas is None
+    lineas = [] if lineas is None else lineas
+    for clave, (nombre, gravable) in (list(ITEMS.items())[:3] if resumido else []):
         valor = round(float(m[clave]), 2)
         if valor <= 0:
             continue
@@ -188,18 +281,36 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
 
 
 def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list[dict] | None = None,
-           R: dict | None = None) -> dict:
+           R: dict | None = None, detalle: pd.DataFrame | None = None) -> dict:
     cliente, items, codigos = _preparar(qbo, R)
+    # Productos: cada uno es un item de QuickBooks y el agua queda marcada como no gravable alli
+    prods, sinc, por_maquina = {}, {"creados": 0, "cambiados": 0, "errores": []}, {}
+    if detalle is not None and len(detalle):
+        n_cuenta, _ = _nombres(R)
+        cuenta = _asegurar(qbo, "Account", "Name", n_cuenta, {"Name": n_cuenta, "AccountType": "Income"})["Id"]
+        d = detalle.assign(venta=detalle["efectivo"] + detalle["tarjeta"],
+                           id_maquina=detalle["id_maquina"].fillna(""))
+        g = (d.groupby(["id_maquina", "producto"], sort=False)
+             .agg(venta=("venta", "sum"), cantidad=("cantidad", "sum"), exento=("exento", "first"),
+                  pagado=("impuesto_pagado", "first")).reset_index())
+        prods, sinc = sincronizar_productos(qbo, {p: not bool(e) for p, e in
+                                                   g.groupby("producto")["exento"].first().items()}, cuenta)
+        por_maquina = {k: v for k, v in g.groupby("id_maquina")}
     fecha = date(anio, mes, monthrange(anio, mes)[1]).isoformat()
     prefijo = f"V{anio % 100:02d}{mes:02d}-"
     existentes = {r["DocNumber"]: r for r in qbo.query(f"select * from SalesReceipt where TxnDate = '{fecha}'")
                   if str(r.get("DocNumber", "")).startswith(prefijo)}
 
-    pedidos = []
+    pedidos, resumidos = [], 0
     for _, m in maquinas.iterrows():
-        r = _recibo(m, cliente, items, codigos, anio, mes, fecha)
+        lineas = None
+        if prods:
+            lineas = _recibo_productos(m, por_maquina.get(m["id_maquina"] or "", pd.DataFrame()), cliente, items,
+                                       prods, codigos, anio, mes, fecha)
+        r = _recibo(m, cliente, items, codigos, anio, mes, fecha, lineas)
         if r is None:
             continue
+        resumidos += lineas is None
         previo = existentes.get(r["DocNumber"])
         if previo:
             r.update(Id=previo["Id"], SyncToken=previo["SyncToken"], sparse=False)
@@ -252,6 +363,7 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
             cuadre.append({"jurisdiccion": nombre, "tasa": q["tasa"], "base_app": 0.0, "base_qbo": q["base"],
                            "impuesto_app": 0.0, "impuesto_qbo": q["impuesto"], "igual": False})
     return {
+        "productos": {**sinc, "en_quickbooks": len(set(prods.values())), "recibos_resumidos": resumidos},
         "cuadre": cuadre, "cuadra": bool(cuadre) and all(c["igual"] for c in cuadre) and not errores,
         "recibos": filas, "errores": errores,
         "creados": sum(f["estado"] == "creado" for f in filas),
