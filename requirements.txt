@@ -9,3 +9,5 @@ intuit-oauth>=1.2.6
 requests>=2.32
 python-dotenv>=1.0
 XlsxWriter
+sqlalchemy>=2.0
+psycopg[binary]>=3.1

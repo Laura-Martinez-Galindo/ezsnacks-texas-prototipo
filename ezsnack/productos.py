@@ -47,9 +47,21 @@ def clave(texto: str) -> str:
     return f"{base} {t:g}oz" if t else base
 
 
-def es_exento(producto: str) -> bool:
-    """Propone como exenta el agua sin endulzar. El usuario confirma la lista."""
-    return bool(PALABRAS_AGUA.search(str(producto))) and not NO_EXENTAS.search(str(producto))
+def _patron(palabras: list[str]) -> re.Pattern | None:
+    palabras = [re.escape(p.strip()) for p in palabras if str(p).strip()]
+    return re.compile(r"\b(" + "|".join(palabras) + r")\b", re.I) if palabras else None
+
+
+def es_exento(producto: str, R: dict | None = None) -> bool:
+    """Propone como exenta el agua sin endulzar. El usuario confirma la lista.
+
+    Las palabras que marcan agua y las excepciones (bebidas que dicen "water" pero llevan azucar)
+    salen de las reglas de la empresa; sin reglas se usan las que vienen con la aplicacion.
+    """
+    if R is None:
+        return bool(PALABRAS_AGUA.search(str(producto))) and not NO_EXENTAS.search(str(producto))
+    si, no = _patron(R.get("agua_palabras") or []), _patron(R.get("agua_excepciones") or [])
+    return bool(si and si.search(str(producto))) and not (no and no.search(str(producto)))
 
 
 def _contiene(palabra: str, del_producto: list[str]) -> bool:

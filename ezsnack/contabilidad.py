@@ -72,7 +72,7 @@ def _deseadas(R: dict) -> dict[str, list[tuple[str, float]]]:
     return deseadas
 
 
-def tasas(qbo: QBO, detalle: bool = False):
+def tasas(qbo: QBO, detalle: bool = False, R: dict | None = None):
     """Crea (o encuentra) las tres tasas de EzSnack. Devuelve jurisdiccion -> id del tax code.
 
     QuickBooks no deja repetir el nombre de una tasa, y las tres comparten la del estado. Por eso
@@ -82,7 +82,7 @@ def tasas(qbo: QBO, detalle: bool = False):
     vieja (QuickBooks no deja editarla por la API). En ese caso se crea un codigo nuevo, con el
     porcentaje en el nombre, y los recibos pasan a usar ese.
     """
-    R = reglas()
+    R = R or reglas()
     agencia = _agencia(qbo)
     rates = qbo.query("select * from TaxRate")
     existentes_rate = {t.get("Name"): t["Id"] for t in rates}
@@ -121,24 +121,31 @@ def tasas(qbo: QBO, detalle: bool = False):
     return (codigos, resumen) if detalle else codigos
 
 
-def _preparar(qbo: QBO) -> tuple[str, dict[str, str], dict[str, str]]:
-    cuenta = _asegurar(qbo, "Account", "Name", CUENTA_INGRESOS, {"Name": CUENTA_INGRESOS, "AccountType": "Income"})["Id"]
-    cliente = _asegurar(qbo, "Customer", "DisplayName", CLIENTE, {"DisplayName": CLIENTE})["Id"]
+def _nombres(R: dict | None) -> tuple[str, str]:
+    conta = (R or {}).get("contabilidad") or {}
+    return conta.get("cuenta") or CUENTA_INGRESOS, conta.get("cliente") or CLIENTE
+
+
+def _preparar(qbo: QBO, R: dict | None = None) -> tuple[str, dict[str, str], dict[str, str]]:
+    n_cuenta, n_cliente = _nombres(R)
+    cuenta = _asegurar(qbo, "Account", "Name", n_cuenta, {"Name": n_cuenta, "AccountType": "Income"})["Id"]
+    cliente = _asegurar(qbo, "Customer", "DisplayName", n_cliente, {"DisplayName": n_cliente})["Id"]
     items = {}
     for clave, (nombre, gravable) in ITEMS.items():
         items[clave] = _asegurar(qbo, "Item", "Name", nombre, {
             "Name": nombre, "Type": "Service", "Taxable": gravable, "IncomeAccountRef": {"value": cuenta}})["Id"]
-    return cliente, items, tasas(qbo)
+    return cliente, items, tasas(qbo, R=R)
 
 
-def preparar(qbo: QBO) -> dict:
+def preparar(qbo: QBO, R: dict | None = None) -> dict:
     """Deja la empresa de QuickBooks con las reglas de impuestos de EzSnack. Se llama al conectar.
 
     Crea lo que falte y no toca lo que ya esta: la agencia (Texas Comptroller), las tasas propias,
     los tres productos con su marca de gravable o no, el cliente generico y la cuenta de ingresos.
     """
-    cuenta = _asegurar(qbo, "Account", "Name", CUENTA_INGRESOS, {"Name": CUENTA_INGRESOS, "AccountType": "Income"})
-    cliente = _asegurar(qbo, "Customer", "DisplayName", CLIENTE, {"DisplayName": CLIENTE})
+    n_cuenta, n_cliente = _nombres(R)
+    cuenta = _asegurar(qbo, "Account", "Name", n_cuenta, {"Name": n_cuenta, "AccountType": "Income"})
+    cliente = _asegurar(qbo, "Customer", "DisplayName", n_cliente, {"DisplayName": n_cliente})
     productos = []
     for _, (nombre, gravable) in ITEMS.items():
         it = _asegurar(qbo, "Item", "Name", nombre, {
@@ -146,7 +153,7 @@ def preparar(qbo: QBO) -> dict:
         if bool(it.get("Taxable")) != gravable:   # alguien le cambio la marca en QuickBooks: se corrige
             it = qbo.actualizar("Item", {"Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable})
         productos.append({"nombre": nombre, "gravable": gravable, "id": it["Id"]})
-    codigos, resumen = tasas(qbo, detalle=True)
+    codigos, resumen = tasas(qbo, detalle=True, R=R)
     return {"tasas": codigos, "detalle": resumen, "productos": productos,
             "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
 
@@ -180,8 +187,9 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
     return r
 
 
-def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list[dict] | None = None) -> dict:
-    cliente, items, codigos = _preparar(qbo)
+def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list[dict] | None = None,
+           R: dict | None = None) -> dict:
+    cliente, items, codigos = _preparar(qbo, R)
     fecha = date(anio, mes, monthrange(anio, mes)[1]).isoformat()
     prefijo = f"V{anio % 100:02d}{mes:02d}-"
     existentes = {r["DocNumber"]: r for r in qbo.query(f"select * from SalesReceipt where TxnDate = '{fecha}'")

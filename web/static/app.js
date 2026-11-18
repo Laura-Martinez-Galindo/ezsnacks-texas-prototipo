@@ -11,8 +11,10 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const estado = {
   anio: null, mes: null, reglas: null, qbo: false, conectado: false, empresa: null,
   codigo: null, ejemplo: false, form: null, res: null, envio: null,
-  ajustes: { exentos: null, pagados: null, cupones_empresa: null }, mapeos: {}, config: null, formatos: [],
+  ajustes: { exentos: null, pagados: null, cupones_empresa: null }, mapeos: {}, cfg: null, usuario: null, roles: {},
 };
+const puede = (rol) => ({ consulta: 0, operador: 1, admin: 2 }[estado.usuario?.rol] ?? -1) >= { consulta: 0, operador: 1, admin: 2 }[rol];
+const fecha = (iso) => (iso ? new Date(iso).toLocaleString("es", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
 /* ---------- utilidades ---------- */
 function avisar(texto, error = false) {
@@ -31,6 +33,7 @@ async function api(ruta, opciones = {}) {
   }
   let datos = null;
   try { datos = await r.json(); } catch { /* sin cuerpo */ }
+  if (r.status === 401 && !ruta.startsWith("/api/sesion")) pedirEntrada();
   if (!r.ok) { const e = new Error(datos?.detail || `El servidor respondió ${r.status}.`); e.status = r.status; e.datos = datos; throw e; }
   return datos;
 }
@@ -87,23 +90,53 @@ document.addEventListener("click", (ev) => {
 /* ---------- conexion con QuickBooks ---------- */
 async function cargarEstado() {
   const e = await api("/api/estado");
+  if (!estado.anio) { llenarSelectores(e.anio); ponerPeriodo(e.anio, e.mes); }
+  if (e.requiere_login) { pedirEntrada(); return false; }
+  $("#entrada").hidden = true;
   estado.reglas = e.reglas;
+  estado.usuario = e.usuario;
+  estado.roles = e.roles;
+  estado.almacen = e.almacen;
   estado.qbo = e.qbo_disponible;
   estado.conectado = e.conectado;
   estado.empresa = e.empresa;
-  if (!estado.anio) { llenarSelectores(e.anio); ponerPeriodo(e.anio, e.mes); }
-  $("#conexion").hidden = !e.qbo_disponible;
+  estado.maquinasGuardadas = e.maquinas_guardadas;
+  document.body.dataset.rol = e.usuario.rol;
+  $("#sesion").hidden = e.usuario.abierto;
+  $("#sesion-estado").innerHTML = `<strong>${esc(e.usuario.nombre)}</strong>${esc(e.roles[e.usuario.rol])}`;
+  $("#btn-cerrar-sesion").hidden = e.usuario.abierto;
+  $("#ayuda-maquinas").textContent = e.maquinas_guardadas
+    ? `${e.maquinas_guardadas} guardadas. Suba el vendor list solo si cambió.` : "Vendor list";
+  const conQbo = e.reglas.contabilidad.destino === "quickbooks";
+  $("#conexion").hidden = !e.qbo_disponible || !conQbo;
   const entorno = e.entorno === "sandbox" ? "empresa de prueba" : "empresa real";
   $("#conexion-estado").innerHTML = e.conectado
     ? `Conectado a <strong>${esc(e.empresa)}</strong>${esc(entorno)}`
     : "Sin conexión a QuickBooks.";
-  $("#btn-conectar").hidden = e.conectado;
-  $("#btn-salir").hidden = !e.conectado;
-  $("#bloque-qbo").hidden = !e.qbo_disponible;
+  $("#btn-conectar").hidden = e.conectado || !puede("admin");
+  $("#btn-salir").hidden = !e.conectado || !puede("admin");
+  $("#bloque-qbo").hidden = !e.qbo_disponible || !conQbo;
   $("#btn-qbo").disabled = !e.conectado;
   if (!e.conectado) $("#guia-qbo").textContent = "Conecte QuickBooks para que calcule el impuesto.";
   pintarComo();
+  return true;
 }
+function pedirEntrada() {
+  $("#entrada").hidden = false;
+  setTimeout(() => $("#ent-usuario").focus(), 50);
+}
+$("#form-entrada").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  ocupado($("#btn-entrar"), async () => {
+    await postJSON("/api/sesion/entrar", { usuario: $("#ent-usuario").value, clave: $("#ent-clave").value });
+    $("#ent-clave").value = "";
+    await iniciar();
+  });
+});
+$("#btn-cerrar-sesion").addEventListener("click", async () => {
+  await api("/api/sesion/salir", { method: "POST" });
+  location.reload();
+});
 $("#btn-salir").addEventListener("click", async () => {
   await api("/auth/salir", { method: "POST" });
   avisar("Se desconectó de QuickBooks.");
@@ -126,35 +159,18 @@ $$(".ranura input").forEach((inp) => inp.addEventListener("change", () => {
       : "";
 }));
 
-function leerConfig() {
-  try { return JSON.parse(localStorage.getItem("ezsnack_reglas") || "null"); } catch { return null; }
-}
-function leerFormatos() {
-  try { const f = JSON.parse(localStorage.getItem("ezsnack_formatos") || "[]"); return Array.isArray(f) ? f : []; } catch { return []; }
-}
-function guardarFormatos() {
-  try { localStorage.setItem("ezsnack_formatos", JSON.stringify(estado.formatos)); } catch { /* sin almacenamiento */ }
-  pintarFormatos();
-}
 function ajustes() {
-  const c = estado.config;
-  return {
-    devoluciones: c && c.devoluciones ? c.devoluciones : null,
-    exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados,
-    cupones_empresa: estado.ajustes.cupones_empresa,
-    cupones_empresa_minimo: c ? c.cupones_empresa_minimo : null,
-    ciudades: c ? c.ciudades : null,
-  };
+  return { exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados, cupones_empresa: estado.ajustes.cupones_empresa };
 }
 
 async function subir(form) {
   const fd = new FormData();
-  fd.append("maquinas", form.get("maquinas"));
+  const lista = form.get("maquinas");
+  if (lista && lista.size) fd.append("maquinas", lista);
   form.getAll("reportes").forEach((f) => f.size && fd.append("reportes", f));
   const pag = form.get("pagados");
   if (pag && pag.size) fd.append("pagados", pag);
   fd.append("mapeos", JSON.stringify(estado.mapeos));
-  fd.append("formatos", JSON.stringify(estado.formatos));
   fd.append("ajustes", JSON.stringify(ajustes()));
   return api(`/api/cierre/archivos?anio=${estado.anio}&mes=${estado.mes}`, { method: "POST", body: fd });
 }
@@ -167,7 +183,6 @@ async function empezar(origen) {
     d = await api("/api/cierre/ejemplo", { method: "POST" });
     estado.form = null; estado.ejemplo = true;
     ponerPeriodo(d.anio, d.mes);
-    if (estado.config) d = { ...(await postJSON(`/api/cierre/${d.codigo}/calcular`, { anio: d.anio, mes: d.mes, ajustes: ajustes() })), codigo: d.codigo };
   } else {
     estado.form = origen; estado.ejemplo = false;
     try { d = await subir(origen); }
@@ -180,12 +195,14 @@ async function empezar(origen) {
   mostrar(d);
   $$(".paso").forEach((p) => (p.disabled = false));
   avisar(`${d.archivos.length} reportes, ${entero(d.maquinas.length)} máquinas.`);
+  const g = d.maquinas_guardadas;
+  if (g && (g.nuevas || g.cambiadas)) { avisar(`Lista de máquinas guardada: ${g.nuevas} nuevas y ${g.cambiadas} con cambios.`); cargarEstado(); cargarConfig(); }
 }
 
 $("#form-archivos").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const fd = new FormData(ev.target);
-  if (!fd.get("maquinas")?.size) { avisar("Elija la lista de máquinas.", true); return; }
+  if (!fd.get("maquinas")?.size && !estado.maquinasGuardadas) { avisar("Elija la lista de máquinas.", true); return; }
   if (!fd.getAll("reportes").some((f) => f.size)) { avisar("Elija al menos un reporte de ventas.", true); return; }
   ocupado($("#btn-calcular"), () => empezar(fd));
 });
@@ -279,31 +296,37 @@ document.addEventListener("click", (ev) => {
   if (b.dataset.registrar !== undefined) {
     const nombre = li.querySelector("[data-sistema]").value.trim();
     if (!nombre) { avisar("Póngale un nombre al sistema, por ejemplo Cantaloupe.", true); return; }
-    estado.formatos = [...estado.formatos.filter((f) => f.nombre.toLowerCase() !== nombre.toLowerCase()), { nombre, mapeo: m }];
-    guardarFormatos();
-    delete estado.mapeos[li.dataset.archivo];
-    avisar(`${nombre} quedó registrado. Sus próximos reportes se reconocen solos.`);
-  } else {
-    estado.mapeos[li.dataset.archivo] = m;
+    ocupado(b, async () => {
+      estado.cfg.formatos = (await postJSON("/api/config/formatos", { nombre, mapeo: m })).formatos;
+      pintarFormatos();
+      delete estado.mapeos[li.dataset.archivo];
+      avisar(`${nombre} quedó registrado. Sus próximos reportes se reconocen solos.`);
+      if (estado.form) await empezar(estado.form);
+    });
+    return;
   }
+  estado.mapeos[li.dataset.archivo] = m;
   if (estado.form) ocupado(b, () => empezar(estado.form));
 });
 function pintarFormatos() {
-  const el = $("#tabla-formatos"); if (!el) return;
+  const el = $("#tabla-formatos"); if (!el || !estado.cfg) return;
   const campos = { maquina: "Máquina", producto: "Producto", cantidad: "Cantidad", efectivo: "Efectivo", tarjeta: "Tarjeta", cupones: "Cupones", total: "Total vendido", metodo: "Forma de pago" };
   const propios = ["Nayax", "AV360", "XMAI", "Qingo"].map((n) => ({ nombre: n, fijo: true }));
   tabla(el, [
     { t: "Sistema", html: (f) => `<strong>${esc(f.nombre)}</strong>` },
     { t: "Cómo se reconoce", html: (f) => (f.fijo ? "Viene con la aplicación" : Object.entries(f.mapeo).map(([k, v]) => `${esc(campos[k] || k)}: <em>${esc(v)}</em>`).join(" · ")) },
-    { t: "", html: (f) => (f.fijo ? "" : `<button class="enlace" data-olvidar="${esc(f.nombre)}">Quitar</button>`) },
-  ], [...propios, ...estado.formatos]);
+    { t: "Registrado por", v: (f) => (f.fijo ? "" : f.por || "") },
+    { t: "", html: (f) => (f.fijo || !puede("operador") ? "" : `<button class="enlace" data-olvidar="${esc(f.nombre)}">Quitar</button>`) },
+  ], [...propios, ...estado.cfg.formatos]);
 }
-document.addEventListener("click", (ev) => {
+document.addEventListener("click", async (ev) => {
   const b = ev.target.closest("[data-olvidar]");
   if (!b) return;
-  estado.formatos = estado.formatos.filter((f) => f.nombre !== b.dataset.olvidar);
-  guardarFormatos();
-  avisar(`Se quitó ${b.dataset.olvidar}.`);
+  try {
+    estado.cfg.formatos = (await postJSON("/api/config/formatos/quitar", { nombre: b.dataset.olvidar, mapeo: {} })).formatos;
+    pintarFormatos();
+    avisar(`Se quitó ${b.dataset.olvidar}.`);
+  } catch (e) { avisar(e.message, true); }
 });
 
 function pintarMaquinas() {
@@ -365,11 +388,21 @@ document.addEventListener("change", (ev) => {
   if (ev.target.matches("[data-exento]")) {
     const fuera = (estado.ajustes.exentos || []).filter((p) => !$$("[data-exento]").some((c) => c.dataset.exento === p));
     estado.ajustes.exentos = [...marcados("[data-exento]", "exento"), ...fuera];
+    recordar({ nombre: ev.target.dataset.exento, exento: ev.target.checked });
     recalcular();
   }
-  if (ev.target.matches("[data-pagado]")) { estado.ajustes.pagados = marcados("[data-pagado]", "pagado"); recalcular(); }
+  if (ev.target.matches("[data-pagado]")) {
+    estado.ajustes.pagados = marcados("[data-pagado]", "pagado");
+    recordar({ nombre: ev.target.dataset.pagado, pagado_habitual: ev.target.checked });
+    recalcular();
+  }
   if (ev.target.matches("[data-cupon]")) { estado.ajustes.cupones_empresa = marcados("[data-cupon]", "cupon"); recalcular(); }
 });
+/* lo que se marca en el paso 2 queda guardado para los meses siguientes */
+async function recordar(cambio) {
+  if (estado.ejemplo || !puede("operador")) return;
+  try { estado.cfg.productos = (await postJSON("/api/config/productos", cambio)).productos; pintarCatalogo(); } catch { /* el cierre sigue igual */ }
+}
 function agregar(input, clave) {
   const nombre = input.value.trim();
   if (!estado.res.productos.includes(nombre)) { avisar("Elija un producto de la lista.", true); return; }
@@ -377,6 +410,7 @@ function agregar(input, clave) {
     ? estado.res.exentos.filter((f) => f.marcado).map((f) => f.producto)
     : estado.res.pagados.filter((f) => f.marcado).map((f) => f.producto);
   estado.ajustes[clave] = [...new Set([...(estado.ajustes[clave] ?? marcadosAhora), nombre])];
+  recordar(clave === "exentos" ? { nombre, exento: true } : { nombre, pagado_habitual: true });
   input.value = "";
   recalcular();
 }
@@ -465,6 +499,16 @@ $("#btn-libro").addEventListener("click", () => ocupado($("#btn-libro"), async (
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }));
 
+$("#btn-guardar-cierre").addEventListener("click", () => ocupado($("#btn-guardar-cierre"), async () => {
+  let r;
+  try { r = await postJSON(`/api/cierre/${estado.codigo}/guardar`, { anio: estado.anio, mes: estado.mes, ajustes: ajustes() }); }
+  catch (e) { if (e.status === 410) { await volverASubir(); throw new Error("Se volvieron a leer los archivos. Intente de nuevo."); } throw e; }
+  estado.cierres = r.cierres;
+  pintarCierres();
+  avisar(`Cierre de ${MESES[estado.mes - 1]} guardado en el historial.`);
+  cargarConfig();
+}));
+
 /* ---------- QuickBooks ---------- */
 $("#btn-qbo").addEventListener("click", () => {
   const barra = $("#prog-qbo");
@@ -484,6 +528,8 @@ $("#btn-qbo").addEventListener("click", () => {
     barra.firstElementChild.style.width = "100%";
     pintarEnvio();
     imprimirTiquete(estado.res);
+    if (estado.envio.aviso) avisar(estado.envio.aviso, true);
+    if (estado.envio.cierre) cargarCierres();
     if (estado.envio.errores.length) avisar(`${estado.envio.errores.length} recibos con error: ${estado.envio.errores[0].error}`, true);
     else avisar("QuickBooks calculó el impuesto.");
   }).finally(() => {
@@ -556,20 +602,25 @@ function imprimirTiquete(d) {
   $("#tq-pie").textContent = `Un solo pago al Texas Comptroller. Vence el ${new Date(c.vence + "T12:00").toLocaleDateString("es", { day: "numeric", month: "long" })}.`;
 }
 
-/* ---------- reglas ---------- */
-function pintarConfig() {
-  const base = estado.reglas;
-  const c = { devoluciones: base.devoluciones, ...(estado.config || {
-    cupones_empresa_minimo: base.cupones_empresa_minimo,
-    ciudades: Object.fromEntries(Object.entries(base.jurisdicciones).map(([k, v]) => [k, v.ciudades])),
-  }) };
-  c.devoluciones = c.devoluciones || base.devoluciones;
-  $("#cfg-dev").value = c.devoluciones.metodo;
-  $("#cfg-pct").value = c.devoluciones.porcentaje;
-  verCamposDev();
-  $("#cfg-houston").value = (c.ciudades.Houston || []).join(", ");
-  $("#cfg-mta").value = (c.ciudades["Houston MTA"] || []).join(", ");
-  $("#cfg-cupones").value = c.cupones_empresa_minimo;
+/* ---------- configuracion ---------- */
+async function cargarConfig() {
+  estado.cfg = await api("/api/config");
+  estado.reglas = estado.cfg.reglas;
+  pintarConfig();
+}
+const lista = (t) => t.split(",").map((x) => x.trim()).filter(Boolean);
+const soloAdmin = () => (puede("admin") ? "" : "disabled");
+const soloOperador = () => (puede("operador") ? "" : "disabled");
+
+function filaJur(nombre, j) {
+  return `<tr>
+    <td><input type="text" data-j="nombre" value="${esc(nombre)}" placeholder="Sugar Land" aria-label="Nombre" ${soloAdmin()}></td>
+    <td><input type="text" data-j="nombre_comptroller" value="${esc(j.nombre_comptroller || "")}" placeholder="SUGAR LAND-CITY" aria-label="Nombre en el Comptroller" ${soloAdmin()}></td>
+    <td><input type="text" data-j="codigo" value="${esc(j.codigo || "")}" placeholder="2079060" aria-label="Código" ${soloAdmin()}></td>
+    <td class="num"><input type="number" data-j="tasa" value="${esc(j.tasa ?? 1)}" min="0" max="30" step="0.01" aria-label="Tasa" ${soloAdmin()}></td>
+    <td><input type="text" data-j="ciudades" value="${esc((j.ciudades || []).join(", "))}" placeholder="Ciudades, separadas por coma" aria-label="Ciudades" ${soloAdmin()}></td>
+    <td>${puede("admin") ? `<button class="enlace" type="button" data-jur-quitar>Quitar</button>` : ""}</td>
+  </tr>`;
 }
 function verCamposDev() {
   const porPct = $("#cfg-dev").value === "porcentaje";
@@ -577,33 +628,268 @@ function verCamposDev() {
   $("#cfg-cupones-campo").hidden = porPct;
 }
 $("#cfg-dev").addEventListener("change", verCamposDev);
-const lista = (t) => t.split(",").map((x) => x.trim()).filter(Boolean);
-$("#form-config").addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  estado.config = {
-    devoluciones: { metodo: $("#cfg-dev").value, porcentaje: +$("#cfg-pct").value || 0 },
-    cupones_empresa_minimo: +$("#cfg-cupones").value || 0,
-    ciudades: { Houston: lista($("#cfg-houston").value), "Houston MTA": lista($("#cfg-mta").value) },
-  };
-  try { localStorage.setItem("ezsnack_reglas", JSON.stringify(estado.config)); } catch { /* sin almacenamiento */ }
-  avisar("Reglas guardadas.");
-  pintarComo();
-  if (estado.codigo) { estado.ajustes.cupones_empresa = null; recalcular(); }
+$("#btn-jur-nueva").addEventListener("click", () => {
+  $("#tabla-jur tbody").insertAdjacentHTML("beforeend", filaJur("", { tasa: 1, ciudades: [] }));
+  $("#tabla-jur tbody tr:last-child input").focus();
 });
-$("#btn-cfg-reset").addEventListener("click", () => {
-  estado.config = null;
-  try { localStorage.removeItem("ezsnack_reglas"); } catch { /* sin almacenamiento */ }
-  pintarConfig();
-  pintarComo();
-  avisar("Reglas originales.");
-  if (estado.codigo) { estado.ajustes.cupones_empresa = null; recalcular(); }
+document.addEventListener("click", (ev) => { ev.target.closest("[data-jur-quitar]")?.closest("tr").remove(); });
+
+function pintarConfig() {
+  const c = estado.cfg; if (!c) return;
+  const R = c.reglas;
+  const a = c.almacen;
+  $("#aviso-almacen").hidden = a.persistente;
+  $("#aviso-almacen p").textContent = "Esta instalación guarda la configuración en un archivo temporal: se pierde cuando el servidor se reinicia. Para que quede fija hay que conectarle una base de datos PostgreSQL (variable DATABASE_URL).";
+  $("#cfg-estado").value = R.tasa_estado;
+  $("#cfg-descuento").value = R.descuento_a_tiempo_pct;
+  $("#tabla-jur").innerHTML = `<thead><tr><th>Jurisdicción</th><th>Nombre en el Comptroller</th><th>Código</th><th class="num">Tasa %</th><th>Ciudades</th><th></th></tr></thead>
+    <tbody>${Object.entries(R.jurisdicciones).map(([n, j]) => filaJur(n, j)).join("")}</tbody>`;
+  $("#cfg-dev").value = R.devoluciones.metodo;
+  $("#cfg-pct").value = R.devoluciones.porcentaje;
+  $("#cfg-cupones").value = R.cupones_empresa_minimo;
+  $("#cfg-cupones-empresas").value = (R.cupones_empresas || []).join(", ");
+  $("#cfg-agua").value = R.agua_palabras.join(", ");
+  $("#cfg-agua-no").value = R.agua_excepciones.join(", ");
+  $("#cfg-destino").value = R.contabilidad.destino;
+  $("#cfg-cuenta").value = R.contabilidad.cuenta;
+  $("#cfg-cliente").value = R.contabilidad.cliente;
+  $("#cfg-desde").value = `${estado.anio}-${String(estado.mes).padStart(2, "0")}`;
+  $("#cfg-nota").value = "";
+  $$("#form-reglas input, #form-reglas select").forEach((el) => { if (!el.closest(".guardar-reglas")) el.disabled = !puede("admin"); });
+  verCamposDev();
+  const v = R._version;
+  $("#cfg-version").textContent = v ? `Reglas vigentes: aplican desde ${v.desde}, guardadas por ${v.por || "la instalación"} el ${fecha(v.creado)}. Hay ${c.versiones.length} versiones guardadas.` : "";
+  pintarCatalogo(); pintarCfgMaquinas(); pintarFormatos(); pintarUsuarios(); pintarBitacora();
+}
+
+function reglasDelFormulario() {
+  const jur = {};
+  $$("#tabla-jur tbody tr").forEach((tr) => {
+    const v = (k) => tr.querySelector(`[data-j="${k}"]`).value.trim();
+    if (!v("nombre")) return;
+    jur[v("nombre")] = { nombre_comptroller: v("nombre_comptroller") || v("nombre"), codigo: v("codigo"), tasa: +v("tasa"), ciudades: lista(v("ciudades")) };
+  });
+  return {
+    tasa_estado: +$("#cfg-estado").value, tasa_compras: +$("#cfg-estado").value,
+    descuento_a_tiempo_pct: +$("#cfg-descuento").value || 0,
+    cupones_empresa_minimo: +$("#cfg-cupones").value || 0, cupones_empresas: lista($("#cfg-cupones-empresas").value),
+    devoluciones: { metodo: $("#cfg-dev").value, porcentaje: +$("#cfg-pct").value || 0 },
+    agua_palabras: lista($("#cfg-agua").value), agua_excepciones: lista($("#cfg-agua-no").value),
+    jurisdicciones: jur,
+    contabilidad: { destino: $("#cfg-destino").value, cuenta: $("#cfg-cuenta").value, cliente: $("#cfg-cliente").value },
+  };
+}
+$("#form-reglas").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  ocupado(ev.submitter || $("#form-reglas button[type=submit]"), async () => {
+    const r = await postJSON("/api/config/reglas", { reglas: reglasDelFormulario(), desde: $("#cfg-desde").value, nota: $("#cfg-nota").value });
+    avisar("Reglas guardadas.");
+    await cargarEstado();
+    await cargarConfig();
+    if (estado.codigo) { estado.ajustes.cupones_empresa = null; estado.envio = null; recalcular(); }
+    if (estado.conectado && r.reglas.contabilidad.destino === "quickbooks") {
+      try { const t = await api("/api/quickbooks/tasas"); estado.tasas = t.tasas; pintarComo(); avisar("QuickBooks quedó con las tasas de las reglas nuevas."); }
+      catch (e) { avisar(`Las reglas se guardaron, pero QuickBooks no se pudo actualizar: ${e.message}`, true); }
+    }
+  });
+});
+
+/* productos */
+function pintarCatalogo() {
+  const el = $("#tabla-catalogo"); if (!el || !estado.cfg) return;
+  const filas = Object.entries(estado.cfg.productos).map(([nombre, p]) => ({ nombre, ...p })).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  if (!filas.length) { el.innerHTML = `<tbody><tr><td>Todavía no hay productos clasificados a mano. Se guardan solos cuando se marcan en el paso 2.</td></tr></tbody>`; return; }
+  tabla(el, [
+    { t: "Producto", v: (f) => f.nombre },
+    { t: "Impuesto", html: (f) => `<select data-cat="${esc(f.nombre)}" aria-label="Impuesto de ${esc(f.nombre)}" ${soloOperador()}>
+        <option value="auto" ${f.exento == null ? "selected" : ""}>Automático</option>
+        <option value="exento" ${f.exento === true ? "selected" : ""}>Sin impuesto (agua)</option>
+        <option value="gravable" ${f.exento === false ? "selected" : ""}>Con impuesto</option></select>` },
+    { t: "Se compra por fuera", html: (f) => `<input type="checkbox" data-cat-pag="${esc(f.nombre)}" ${f.pagado_habitual ? "checked" : ""} ${soloOperador()} aria-label="Se compra por fuera: ${esc(f.nombre)}">` },
+    { t: "Último cambio", html: (f) => `${esc(f.por || "")}<span class="sub">${esc(fecha(f.actualizado))}</span>` },
+  ], filas);
+}
+async function clasificar(cambio) {
+  try {
+    estado.cfg.productos = (await postJSON("/api/config/productos", cambio)).productos;
+    pintarCatalogo();
+    if (estado.codigo) { estado.ajustes.exentos = null; estado.ajustes.pagados = null; recalcular(); }
+  } catch (e) { avisar(e.message, true); }
+}
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (t.matches("[data-cat]")) clasificar(t.value === "auto" ? { nombre: t.dataset.cat, automatico: true } : { nombre: t.dataset.cat, exento: t.value === "exento" });
+  if (t.matches("[data-cat-pag]")) clasificar({ nombre: t.dataset.catPag, pagado_habitual: t.checked });
+});
+$("#btn-prod-nuevo").addEventListener("click", () => {
+  const nombre = $("#prod-nuevo").value.trim();
+  if (!nombre) { avisar("Escriba el nombre del producto.", true); return; }
+  $("#prod-nuevo").value = "";
+  clasificar({ nombre, exento: true });
+});
+
+/* maquinas */
+function jurisdiccionDe(ciudad) {
+  const c = String(ciudad || "").toLowerCase();
+  const hallada = Object.entries(estado.reglas.jurisdicciones).find(([, j]) => j.ciudades.some((x) => x.toLowerCase() === c));
+  return hallada ? hallada[1].nombre_comptroller : "Solo estado";
+}
+function pintarCfgMaquinas() {
+  const el = $("#tabla-cfg-maquinas"); if (!el || !estado.cfg) return;
+  const q = $("#buscar-cfg-maquina").value.trim().toLowerCase();
+  const filas = estado.cfg.maquinas.filter((m) => !q || `${m.id_maquina} ${m.locacion} ${m.ciudad} ${m.direccion}`.toLowerCase().includes(q));
+  if (!estado.cfg.maquinas.length) { el.innerHTML = `<tbody><tr><td>Todavía no hay máquinas guardadas. Suba el vendor list aquí o en el paso 1.</td></tr></tbody>`; return; }
+  tabla(el, [
+    { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.locacion || "")}</span>` },
+    { t: "Dirección", v: (f) => f.direccion || "" },
+    { t: "Ciudad", html: (f) => `<input type="text" data-maq-ciudad="${esc(f.id_maquina)}" value="${esc(f.ciudad || "")}" aria-label="Ciudad de la máquina ${esc(f.id_maquina)}" ${soloOperador()}>` },
+    { t: "Impuesto local", v: (f) => jurisdiccionDe(f.ciudad) },
+    { t: "Activa", html: (f) => `<input type="checkbox" data-maq-activa="${esc(f.id_maquina)}" ${f.activa ? "checked" : ""} ${soloOperador()} aria-label="Activa: máquina ${esc(f.id_maquina)}">` },
+  ], filas, ["", "", "", "", `${filas.length} de ${estado.cfg.maquinas.length}`]);
+}
+$("#buscar-cfg-maquina").addEventListener("input", pintarCfgMaquinas);
+document.addEventListener("change", async (ev) => {
+  const t = ev.target;
+  const id = t.dataset.maqCiudad ?? t.dataset.maqActiva;
+  if (id === undefined) return;
+  try {
+    const cambio = t.dataset.maqCiudad !== undefined ? { ciudad: t.value } : { activa: t.checked };
+    estado.cfg.maquinas = (await postJSON(`/api/config/maquinas/${encodeURIComponent(id)}`, cambio)).maquinas;
+    pintarCfgMaquinas();
+    avisar(`Máquina ${id} actualizada. Vuelva a unir las ventas para que el cierre la tome.`);
+  } catch (e) { avisar(e.message, true); }
+});
+$("#archivo-maquinas").addEventListener("change", async (ev) => {
+  const archivo = ev.target.files[0]; if (!archivo) return;
+  const fd = new FormData(); fd.append("lista", archivo);
+  try {
+    const r = await api("/api/config/maquinas", { method: "POST", body: fd });
+    estado.cfg.maquinas = r.maquinas;
+    pintarCfgMaquinas();
+    avisar(`${r.total} máquinas guardadas: ${r.nuevas} nuevas y ${r.cambiadas} con cambios.`);
+    cargarEstado();
+  } catch (e) { avisar(e.message, true); }
+  ev.target.value = "";
+});
+
+/* usuarios */
+const PERMISOS = [
+  { a: "Ver el historial de cierres y la configuración", consulta: true, operador: true, admin: true },
+  { a: "Subir reportes, hacer el cierre y descargar el Excel", operador: true, admin: true },
+  { a: "Clasificar productos, editar máquinas y registrar sistemas", operador: true, admin: true },
+  { a: "Enviar el cierre a contabilidad y marcarlo como declarado", operador: true, admin: true },
+  { a: "Cambiar tasas, jurisdicciones, devoluciones y contabilidad", admin: true },
+  { a: "Conectar QuickBooks y manejar los usuarios", admin: true },
+];
+function pintarUsuarios() {
+  if (!estado.cfg || !puede("admin")) return;
+  const R = estado.roles, U = estado.cfg.usuarios;
+  $("#usr-rol").innerHTML = Object.entries(R).map(([k, v]) => `<option value="${k}" ${k === (U.length ? "operador" : "admin") ? "selected" : ""}>${esc(v)}</option>`).join("");
+  $("#guia-usuarios").textContent = U.length
+    ? "Cada persona entra con su usuario y solo puede hacer lo que su rol permite."
+    : "Todavía no hay usuarios: cualquiera que abra la página puede cambiar todo. Cree primero un administrador; desde ese momento la página pide usuario y clave.";
+  const opciones = (rol) => Object.entries(R).map(([k, v]) => `<option value="${k}" ${k === rol ? "selected" : ""}>${esc(v)}</option>`).join("");
+  if (U.length) {
+    tabla($("#tabla-usuarios"), [
+      { t: "Nombre", html: (f) => `<strong>${esc(f.nombre)}</strong><span class="sub">${esc(f.usuario)}</span>` },
+      { t: "Rol", html: (f) => `<select data-usr-rol="${f.id}" aria-label="Rol de ${esc(f.nombre)}">${opciones(f.rol)}</select>` },
+      { t: "Activo", html: (f) => `<input type="checkbox" data-usr-activo="${f.id}" ${f.activo ? "checked" : ""} aria-label="Activo: ${esc(f.nombre)}">` },
+    ], U);
+  } else { $("#tabla-usuarios").innerHTML = ""; }
+  const si = (x) => (x ? `<span class="igual">Sí</span>` : "");
+  tabla($("#tabla-roles"), [
+    { t: "Qué puede hacer", v: (f) => f.a },
+    ...["consulta", "operador", "admin"].map((k) => ({ t: R[k], html: (f) => si(f[k]) })),
+  ], PERMISOS);
+}
+document.addEventListener("change", async (ev) => {
+  const t = ev.target;
+  const id = t.dataset.usrRol ?? t.dataset.usrActivo;
+  if (id === undefined) return;
+  try {
+    await postJSON(`/api/config/usuarios/${id}`, t.dataset.usrRol !== undefined ? { rol: t.value } : { activo: t.checked });
+    avisar("Usuario actualizado.");
+    await cargarConfig(); return;
+  } catch (e) { avisar(e.message, true); }
+  pintarUsuarios();
+});
+$("#form-usuario").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  ocupado(ev.submitter, async () => {
+    const r = await postJSON("/api/config/usuarios", { nombre: $("#usr-nombre").value, usuario: $("#usr-usuario").value, clave: $("#usr-clave").value, rol: $("#usr-rol").value });
+    ev.target.reset();
+    if (r.primero) { avisar("Administrador creado. Entre con ese usuario."); await iniciar(); return; }
+    await cargarConfig();
+    avisar("Usuario creado.");
+  });
+});
+
+function pintarBitacora() {
+  if (!estado.cfg) return;
+  tabla($("#tabla-bitacora"), [
+    { t: "Cuándo", v: (f) => fecha(f.fecha) },
+    { t: "Quién", v: (f) => f.usuario || "" },
+    { t: "Qué hizo", html: (f) => `<strong>${esc(f.accion)}</strong>${f.detalle ? `<span class="sub">${esc(f.detalle)}</span>` : ""}` },
+  ], estado.cfg.bitacora);
+  if (!estado.cfg.bitacora.length) $("#tabla-bitacora").innerHTML = `<tbody><tr><td>Todavía no hay cambios registrados.</td></tr></tbody>`;
+}
+
+/* ---------- historial de cierres ---------- */
+const ESTADOS = { guardado: ["Guardado", "estado-revisar"], enviado: ["Enviado a contabilidad", "estado-impuesto"], declarado: ["Declarado", "estado-ok"] };
+async function cargarCierres() {
+  estado.cierres = (await api("/api/cierres")).cierres;
+  pintarCierres();
+}
+function pintarCierres() {
+  const C = estado.cierres || [];
+  if (!C.length) { $("#tabla-cierres").innerHTML = `<tbody><tr><td>Todavía no hay cierres guardados. Se guardan desde el paso 3, o solos al enviar a contabilidad.</td></tr></tbody>`; return; }
+  tabla($("#tabla-cierres"), [
+    { t: "Mes", html: (f) => `<strong>${MESES[f.mes - 1][0].toUpperCase() + MESES[f.mes - 1].slice(1)} ${f.anio}</strong><span class="sub">${esc(f.por || "")} · ${esc(fecha(f.guardado))}</span>` },
+    { t: "Estado", html: (f) => `<span class="estado ${ESTADOS[f.estado][1]}">${ESTADOS[f.estado][0]}</span>` },
+    { t: "Ventas netas", num: true, v: (f) => dinero(f.total_ventas) },
+    { t: "Gravables", num: true, v: (f) => dinero(f.ventas_gravables) },
+    { t: "Impuesto", num: true, v: (f) => dinero(f.impuesto) },
+    { t: "En contabilidad", num: true, html: (f) => (f.impuesto_contabilidad == null ? "" : `${dinero(f.impuesto_contabilidad)}<span class="sub ${f.cuadra ? "igual" : "distinto"}">${f.cuadra ? "cuadra" : "no cuadra"}</span>`) },
+    { t: "", html: (f) => `<button class="enlace" data-ver-cierre="${f.id}">Ver</button>${puede("operador") ? ` <button class="enlace" data-estado-cierre="${f.id}" data-nuevo="${f.estado === "declarado" ? "guardado" : "declarado"}">${f.estado === "declarado" ? "Reabrir" : "Marcar declarado"}</button>` : ""}` },
+  ], C);
+}
+document.addEventListener("click", async (ev) => {
+  const ver = ev.target.closest("[data-ver-cierre]");
+  const est = ev.target.closest("[data-estado-cierre]");
+  try {
+    if (est) {
+      estado.cierres = (await postJSON(`/api/cierres/${est.dataset.estadoCierre}/estado`, { estado: est.dataset.nuevo })).cierres;
+      pintarCierres();
+      avisar(est.dataset.nuevo === "declarado" ? "Cierre marcado como declarado." : "Cierre reabierto.");
+    }
+    if (ver) {
+      const c = await api(`/api/cierres/${ver.dataset.verCierre}`);
+      const p = c.resumen, d = c.declaracion;
+      $("#detalle-cierre").hidden = false;
+      $("#titulo-detalle").textContent = `Cierre de ${MESES[c.mes - 1]} ${c.anio}`;
+      const fila = (t, k) => ({ t, v: p[k]?.total });
+      tabla($("#tabla-detalle"), [{ t: "", v: (f) => f.t }, { t: "Valor", num: true, v: (f) => dinero(f.v) }], [
+        fila("Ventas en efectivo y tarjeta", "ventas"), fila("Devoluciones a clientes", "devoluciones"), fila("Ventas netas", "neto"),
+        fila("Agua", "agua"), fila("Comprado con impuesto pagado", "walmart"), fila("Ventas gravables", "gravable"),
+        ...d.locales.map((l) => ({ t: `Base de ${l.nombre_comptroller} (${pct(l.tasa)})`, v: l.base_exacta ?? l.base })),
+        { t: "Impuesto según el Comptroller", v: d.impuesto_total },
+      ]);
+      const dev = c.reglas.devoluciones;
+      $("#nota-detalle").textContent = `Reglas de ese cierre: estado ${pct(c.reglas.tasa_estado)}, devoluciones ${dev.metodo === "porcentaje" ? `al ${pct(dev.porcentaje)}` : "por cupones"}. `
+        + `Archivos: ${c.archivos.map((a) => `${a.fuente} (${a.archivo})`).join(", ")}.`;
+      tabla($("#tabla-detalle-maquinas"), [
+        { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.maquina)}</span>` },
+        { t: "Ciudad", v: (f) => f.ciudad }, { t: "Impuesto local", v: (f) => f.jurisdiccion },
+        { t: "Ventas", num: true, v: (f) => dinero(f.ventas) }, { t: "Gravable", num: true, v: (f) => dinero(f.gravable) },
+      ], c.maquinas.sort((a, b) => (+a.id_maquina || 0) - (+b.id_maquina || 0)));
+      $("#detalle-cierre").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  } catch (e) { avisar(e.message, true); }
 });
 
 /* ---------- como funciona ---------- */
 function pintarComo() {
   const R = estado.reglas; if (!R) return;
-  const ciudades = estado.config ? estado.config.ciudades
-    : Object.fromEntries(Object.entries(R.jurisdicciones).map(([k, v]) => [k, v.ciudades]));
 
   tabla($("#tabla-pasos"), [
     { t: "Paso del cierre", v: (f) => f.p },
@@ -644,14 +930,14 @@ function pintarComo() {
   ]);
 
   const tasas = estado.tasas || {};
+  const J = R.jurisdicciones;
   tabla($("#tabla-tasas"), [
     { t: "Tasa en QuickBooks", v: (f) => f.n },
     { t: "Se arma con", v: (f) => f.d },
     { t: "Se aplica a", v: (f) => f.a },
     { t: "Id", v: (f) => tasas[f.k] || "" },
   ], [
-    { k: "Houston", n: "EzSnack Houston", d: `${pct(R.tasa_estado)} estado + ${pct(R.jurisdicciones.Houston.tasa)} HOUSTON-CITY`, a: (ciudades.Houston || []).join(", ") },
-    { k: "Houston MTA", n: "EzSnack Houston MTA", d: `${pct(R.tasa_estado)} estado + ${pct(R.jurisdicciones["Houston MTA"].tasa)} HOUSTON MTA`, a: (ciudades["Houston MTA"] || []).join(", ") },
+    ...Object.entries(J).map(([k, j]) => ({ k, n: `EzSnack ${k}`, d: `${pct(R.tasa_estado)} estado + ${pct(j.tasa)} ${j.nombre_comptroller}`, a: j.ciudades.join(", ") })),
     { k: "Solo estado", n: "EzSnack Solo estado", d: `${pct(R.tasa_estado)} estado`, a: "Las demás ciudades" },
   ]);
   $("#nota-tasas").textContent = estado.tasas
@@ -660,6 +946,7 @@ function pintarComo() {
 
   dosCol($("#tabla-tecnica"), [
     { a: "<strong>Servidor</strong>", b: "Python con FastAPI. Los archivos se leen en memoria con pandas y openpyxl, y se borran a las tres horas." },
+    { a: "<strong>Base de datos</strong>", b: `${esc(estado.almacen?.motor || "")}. Guarda las reglas con su historial, las máquinas, los productos clasificados, los sistemas registrados, los usuarios y cada cierre. Los archivos de ventas no se guardan.` },
     { a: "<strong>Autorización</strong>", b: "OAuth 2. La página manda al usuario a Intuit, Intuit devuelve un código y el servidor lo cambia por un token de acceso y uno de refresco." },
     { a: "<strong>Dónde quedan los tokens</strong>", b: "Cifrados en una cookie del navegador de cada usuario, no en el servidor. Cada quien ve solo la empresa que autorizó." },
     { a: "<strong>Renovación</strong>", b: "El token de acceso dura una hora. Cuando vence, el servidor lo renueva con el de refresco y vuelve a intentar la llamada." },
@@ -676,10 +963,23 @@ if (q.get("conexion") === "ok") avisar(q.get("reglas") === "ok"
 if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se canceló.", true);
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);
 if (q.has("conexion")) history.replaceState(null, "", "/");
-estado.config = leerConfig();
-estado.formatos = leerFormatos();
-cargarEstado().then(() => {
-  pintarConfig();
-  pintarFormatos();
-  if (estado.conectado) api("/api/quickbooks/tasas").then((d) => { estado.tasas = d.tasas; pintarComo(); }).catch(() => {});
-}).catch((e) => avisar(e.message, true));
+async function iniciar() {
+  if (!(await cargarEstado())) return;
+  await cargarConfig();
+  await cargarCierres();
+  // los sistemas que antes se guardaban en este navegador pasan a la base de la empresa
+  try {
+    const viejos = JSON.parse(localStorage.getItem("ezsnack_formatos") || "[]");
+    if (viejos.length && puede("operador")) {
+      for (const f of viejos) await postJSON("/api/config/formatos", f).catch(() => {});
+      localStorage.removeItem("ezsnack_formatos");
+      localStorage.removeItem("ezsnack_reglas");
+      await cargarConfig();
+    }
+  } catch { /* sin almacenamiento */ }
+  if (!puede("operador")) ir("historial");
+  if (estado.conectado && puede("operador") && estado.reglas.contabilidad.destino === "quickbooks") {
+    api("/api/quickbooks/tasas").then((d) => { estado.tasas = d.tasas; pintarComo(); }).catch(() => {});
+  }
+}
+iniciar().catch((e) => avisar(e.message, true));
