@@ -185,9 +185,13 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         pm["neto_e"], pm["neto_t"] = (pm["efectivo"] * factor).map(_c), (pm["tarjeta"] * factor).map(_c)
         pm["cup_emp"], pm["cup_dev"] = 0.0, 0.0
     else:
+        # Los cupones que compran las empresas para sus empleados se cobran aparte: por defecto no
+        # cuentan ni como venta ni como devolucion. Solo restan los cupones de reembolso.
+        if not R.get("cupones_empresa_cuentan", False):
+            pm["cup_emp"] = 0.0
         pm["neto_e"], pm["neto_t"] = pm["efectivo"], (pm["tarjeta"] + pm["cup_emp"] - pm["cup_dev"]).map(_c)
     pm["dev_e"] = (pm["efectivo"] - pm["neto_e"]).map(_c)
-    pm["dev_t"] = (pm["tarjeta"] + pm["cup_emp"] - pm["neto_t"]).map(_c)
+    pm["dev_t"] = (pm["tarjeta"] + pm["cup_emp"] - pm["neto_t"]).map(_c)   # = cupones de reembolso
     pm["unidades"] = pm["cantidad"].astype(float)
     pm["ventas"] = (pm["neto_e"] + pm["neto_t"]).map(_c)
     pm["exentas"] = (pm["ex_e"] + pm["ex_t"]).map(_c)
@@ -234,6 +238,8 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
              for k, v in filas.items()}
     pasos["prepago"] = round(float(d["prepago"].sum() + d["otros"].sum()), 2)
     pasos["cupones_minimo"] = R["cupones_empresa_minimo"]
+    pasos["cupones_empresa_cuentan"] = bool(R.get("cupones_empresa_cuentan", False))
+    pasos["cupones_empresa_fuera"] = round(float(d["cup_emp"].sum()), 2) if not pasos["cupones_empresa_cuentan"] and not por_pct else 0.0
     pasos["devoluciones_metodo"] = dev["metodo"]
     pasos["devoluciones_pct"] = dev["porcentaje"]
     pasos["cupones_reporte"] = round(float(d["cupones"].sum()), 2)

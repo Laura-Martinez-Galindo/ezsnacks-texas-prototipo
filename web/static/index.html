@@ -237,13 +237,19 @@
           </label>
         </div>
         <div class="fila-campos" id="cfg-cupones-campo">
+          <label>Cupones que compran las empresas
+            <select id="cfg-cupones-cuentan">
+              <option value="no">No cuentan: ni venta ni devolución</option>
+              <option value="si">Cuentan como venta</option>
+            </select>
+          </label>
           <label>Máquinas donde una empresa compra cupones
             <input type="text" id="cfg-cupones-empresas" placeholder="Número de máquina, separados por coma">
-            <small>Sus cupones siempre son venta, sin importar el monto.</small>
+            <small>Sus cupones siempre son de empresa, sin importar el monto.</small>
           </label>
-          <label>En las demás, es venta a una empresa desde
+          <label>En las demás, son de empresa desde
             <span class="campo-unidad"><span>$</span><input type="number" id="cfg-cupones" min="0" step="1"></span>
-            <small>Por debajo de ese monto son devoluciones a clientes.</small>
+            <small>Por debajo de ese monto son devoluciones a clientes y se restan.</small>
           </label>
         </div>
         <div class="fila-campos">

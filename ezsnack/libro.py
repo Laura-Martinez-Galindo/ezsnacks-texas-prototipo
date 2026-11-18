@@ -108,7 +108,8 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
 
     for i, m in enumerate(pm.itertuples(index=False)):
         r = i + 2
-        cup = "" if por_pct else ("sale" if m.id_maquina in empresas else "refund")
+        cuentan = res["reglas"].get("cupones_empresa_cuentan", False)
+        cup = "" if por_pct else (("sale" if cuentan else "company") if m.id_maquina in empresas else "refund")
         wm_.write_string(i + 1, 0, str(m.id_maquina or ""))
         wm_.write_string(i + 1, 1, str(m.maquina))
         wm_.write_string(i + 1, 2, str(m.ciudad or ""))
@@ -123,7 +124,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
             wm_.write_formula(f"J{r}", f"=ROUND(G{r}*(1-Lists!$H$2/100),2)", num, float(m.neto_t))
         else:
             wm_.write_formula(f"I{r}", f"=F{r}", num, float(m.neto_e))
-            wm_.write_formula(f"J{r}", f'=G{r}+IF(E{r}="sale",H{r},-H{r})', num, float(m.neto_t))
+            wm_.write_formula(f"J{r}", f'=G{r}+IF(E{r}="sale",H{r},IF(E{r}="refund",-H{r},0))', num, float(m.neto_t))
         wm_.write_formula(f"K{r}", por_lista("A", fa, "Cash Sales", r), num, float(m.ex_e))
         wm_.write_formula(f"L{r}", por_lista("A", fa, "Credit Sales", r), num, float(m.ex_t))
         wm_.write_formula(f"M{r}", por_lista("B", fb, "Cash Sales", r), num, float(m.pag_e))
@@ -230,7 +231,8 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         ("Coupons", "Hoerbiger buys coupons every month for its employees: that is a sale. The rest are sent to "
                     "customers who report a failed vend: that is a return."),
         ("Returns", f"Returns to customer are {dev['porcentaje']:g} % of cash and credit sales, machine by machine." if por_pct
-                    else "Returns to customer are the refund coupons of the month. Coupons bought by companies are sales."),
+                    else "Returns to customer are the refund coupons of the month. Coupons bought by companies are "
+                    + ("sales." if res["reglas"].get("cupones_empresa_cuentan") else "not counted (marked company in Machines).")),
         ("Machines", "One row per machine: it is the sales receipt sent to QuickBooks. The summary adds that sheet."),
         ("Lists", "Water and Walmart buys come from Lists. Change a list and the workbook recalculates."),
         ("Files", "; ".join(f"{l.fuente}: {l.archivo}" for l in lecturas)),

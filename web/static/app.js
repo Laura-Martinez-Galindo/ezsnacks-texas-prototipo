@@ -373,12 +373,14 @@ function pintarProductos(d) {
   const porPct = d.pasos.devoluciones_metodo === "porcentaje";
   $("#vista-productos .guia").textContent = porPct
     ? `Las devoluciones se calculan como el ${pct(d.pasos.devoluciones_pct)} de lo vendido (regla de porcentaje fijo). Los cupones del reporte, ${dinero(d.pasos.cupones_reporte)}, no entran en la cuenta.`
-    : "Los que compra una empresa para sus empleados son venta. Los demás se devolvieron a clientes que reclamaron y se restan.";
+    : d.pasos.cupones_empresa_cuentan
+      ? "Los que compra una empresa para sus empleados son venta. Los demás se devolvieron a clientes que reclamaron y se restan."
+      : `Los que compra una empresa para sus empleados (${dinero(d.pasos.cupones_empresa_fuera)} este mes) no cuentan: ni venta ni devolución. Los demás se devolvieron a clientes que reclamaron y se restan.`;
   tabla($("#tabla-cupones"), [
     { t: "Lo compró una empresa", html: (f) => `<input type="checkbox" data-cupon="${esc(f.id_maquina)}" ${f.de_empresa ? "checked" : ""} ${porPct ? "disabled" : ""} aria-label="Cupones de empresa: ${esc(f.maquina)}">` },
     { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.locacion || f.maquina)}</span>` },
     { t: "Cupones del mes", num: true, v: (f) => dinero(f.valor) },
-    { t: "Cuenta como", v: (f) => (porPct ? "No se usa" : f.de_empresa ? "Venta" : "Devolución") },
+    { t: "Cuenta como", v: (f) => (porPct ? "No se usa" : f.de_empresa ? (d.pasos.cupones_empresa_cuentan ? "Venta" : "No cuenta") : "Devolución") },
   ], C, porPct ? ["", "Cupones del reporte", dinero(d.pasos.cupones_reporte), ""] : ["", "Venta / devolución", dinero(d.pasos.cupones_empresa.total), dinero(d.pasos.devoluciones.total)]);
   if (!C.length) $("#tabla-cupones").innerHTML = `<tbody><tr><td>Ningún reporte trae cupones este mes.</td></tr></tbody>`;
 }
@@ -423,7 +425,7 @@ function pintarDeclaracion(d) {
   const porPct = p.devoluciones_metodo === "porcentaje";
   const filas = [
     { c: "Ventas en efectivo y tarjeta", k: "ventas" },
-    ...(porPct ? [] : [{ c: "Cupones que compró una empresa", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
+    ...(porPct || !p.cupones_empresa_cuentan ? [] : [{ c: "Cupones que compró una empresa", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
     { c: porPct ? `Devoluciones a clientes, ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes", k: "devoluciones", menos: true },
     { c: "Ventas netas", k: "neto", _clase: "fila-fuerte" },
     { c: "Agua", k: "agua", menos: true },
@@ -651,6 +653,7 @@ function pintarConfig() {
   $("#cfg-pct").value = R.devoluciones.porcentaje;
   $("#cfg-cupones").value = R.cupones_empresa_minimo;
   $("#cfg-cupones-empresas").value = (R.cupones_empresas || []).join(", ");
+  $("#cfg-cupones-cuentan").value = R.cupones_empresa_cuentan ? "si" : "no";
   $("#cfg-agua").value = R.agua_palabras.join(", ");
   $("#cfg-agua-no").value = R.agua_excepciones.join(", ");
   $("#cfg-destino").value = R.contabilidad.destino;
@@ -676,6 +679,7 @@ function reglasDelFormulario() {
     tasa_estado: +$("#cfg-estado").value, tasa_compras: +$("#cfg-estado").value,
     descuento_a_tiempo_pct: +$("#cfg-descuento").value || 0,
     cupones_empresa_minimo: +$("#cfg-cupones").value || 0, cupones_empresas: lista($("#cfg-cupones-empresas").value),
+    cupones_empresa_cuentan: $("#cfg-cupones-cuentan").value === "si",
     devoluciones: { metodo: $("#cfg-dev").value, porcentaje: +$("#cfg-pct").value || 0 },
     agua_palabras: lista($("#cfg-agua").value), agua_excepciones: lista($("#cfg-agua-no").value),
     jurisdicciones: jur,
