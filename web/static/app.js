@@ -964,6 +964,8 @@ if (q.get("conexion") === "cancelada") avisar("La conexión con QuickBooks se ca
 if (q.get("conexion") === "invalida") avisar("La conexión venció. Inténtelo de nuevo.", true);
 if (q.has("conexion")) history.replaceState(null, "", "/");
 async function iniciar() {
+  // la comparacion con el Excel hecho a mano es una herramienta del equipo, no del gerente
+  $("#bloque-comparar").hidden = !new URLSearchParams(location.search).has("interno");
   if (!(await cargarEstado())) return;
   await cargarConfig();
   await cargarCierres();

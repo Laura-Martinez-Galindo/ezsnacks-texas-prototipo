@@ -69,7 +69,7 @@ def test_cierre_sigue_las_formulas_del_excel(lecturas):
 def test_cupones_de_empresa_se_separan_de_las_devoluciones(lecturas):
     """Una maquina con muchos cupones al mes se los vendio a una empresa: es venta, no devolucion."""
     integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
-    r = cierre.calcular(integ, cierre.Ajustes(cupones_empresa=["208"]), 2026, 9)
+    r = cierre.calcular(integ, cierre.Ajustes(cupones_empresa=["208"], devoluciones={"metodo": "cupones"}), 2026, 9)
     assert [c["id_maquina"] for c in r["cupones"] if c["de_empresa"]] == ["208"]
     total = sum(c["valor"] for c in r["cupones"])
     vendidos = sum(c["valor"] for c in r["cupones"] if c["de_empresa"])
@@ -91,7 +91,7 @@ def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):
     assert [c.value for c in ws[1]][:3] == ["Source", "Machine", "Product"]
     formulas = [ws.cell(row=f, column=4).value for f in range(ws.max_row - 17, ws.max_row + 1)]
     assert "Coupons sold to companies" in formulas
-    assert "Returns to customer (coupons)" in formulas
+    assert "Returns to customer (3 %)" in formulas     # la regla por defecto es la del gerente: 3 % fijo
 
 
 def test_api_de_ejemplo_y_excel():
@@ -181,3 +181,13 @@ def test_comparacion_encuentra_la_maquina_que_falto(lecturas):
     assert filas["Ventas en efectivo y tarjeta"]["dif"] == 0
     assert any("3 % fijo" in x for x in filas["Devoluciones a clientes"]["causas"])
     assert any(falta["maquina"] in x for x in filas["Ventas de las máquinas de Houston"]["causas"])
+
+
+def test_reglas_por_defecto_siguen_el_proceso_del_gerente(lecturas):
+    """Sin tocar nada: 3 % fijo de devoluciones y agua = todo producto que diga water, endulzado o no."""
+    integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    p = r["pasos"]
+    assert p["devoluciones_metodo"] == "porcentaje" and p["devoluciones_pct"] == 3
+    con_water = integ[integ["producto"].str.contains(r"\bwater\b", case=False, regex=True)]
+    assert p["agua"]["total"] == pytest.approx(float((con_water["efectivo"] + con_water["tarjeta"]).sum()), abs=0.02)

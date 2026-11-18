@@ -87,11 +87,11 @@ Después de enviar el mes, la página muestra tasa por tasa la base y el impuest
 
 ## Devoluciones a clientes
 
-Es una regla que se cambia en Configuración. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan.
+Es una regla que se cambia en Configuración. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan. Por defecto la aplicación sigue el proceso del gerente: 3 % fijo de devoluciones y agua es todo producto cuyo nombre diga water, también el endulzado. Las dos cosas se cambian en Configuración.
 
 ## Comparar con el Excel hecho a mano
 
-En el paso 3 se sube el Excel integrado que el gerente armó para el mismo mes. La aplicación lee su tabla y su resumen, compara renglón por renglón y busca la causa de cada diferencia en los datos: una máquina que está en el reporte del lector y no en el Excel, un porcentaje fijo en lugar de los cupones, una cifra digitada que no sale de la tabla del mismo archivo, o una máquina que se quedó por fuera al filtrar a mano las de Houston. Sirve para correr un mes en paralelo antes de dejar el proceso manual.
+Es una herramienta del equipo y no aparece en la página normal: se abre agregando ?interno=1 al final de la dirección. En el paso 3 se sube el Excel integrado que el gerente armó para el mismo mes. La aplicación lee su tabla y su resumen, compara renglón por renglón y busca la causa de cada diferencia en los datos: una máquina que está en el reporte del lector y no en el Excel, un porcentaje fijo en lugar de los cupones, una cifra digitada que no sale de la tabla del mismo archivo, o una máquina que se quedó por fuera al filtrar a mano las de Houston. Sirve para correr un mes en paralelo antes de dejar el proceso manual.
 
 ## Registrar otro sistema de ventas
 
