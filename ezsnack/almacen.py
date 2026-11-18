@@ -124,7 +124,8 @@ def completar(R: dict) -> dict:
     R = dict(R)
     R.setdefault("devoluciones", {"metodo": "cupones", "porcentaje": 3.0})
     R.setdefault("cupones_empresa_minimo", 100)
-    R.setdefault("cupones_empresas", [])        # maquinas cuyos cupones siempre son venta a una empresa
+    R.setdefault("cupones_empresas", [])        # maquinas donde una empresa compra cupones para sus empleados
+    R.setdefault("cupones_empresa_cuentan", False)   # los cupones de empresas no son venta ni devolucion
     R.setdefault("agua_palabras", ["water", "agua"])
     R.setdefault("agua_excepciones", ["vitamin", "coconut", "tonic", "flavored", "kiwi", "strawberry", "lemonade", "juice", "bubly"])
     R.setdefault("contabilidad", {})
@@ -211,6 +212,7 @@ def validar_reglas(R: dict) -> dict:
               "descuento_a_tiempo_pct": pct(R.get("descuento_a_tiempo_pct", 0), "El descuento por pago a tiempo", 10),
               "cupones_empresa_minimo": max(float(R.get("cupones_empresa_minimo") or 0), 0.0),
               "cupones_empresas": textos(R.get("cupones_empresas")),
+              "cupones_empresa_cuentan": bool(R.get("cupones_empresa_cuentan", False)),
               "agua_palabras": [t.lower() for t in textos(R.get("agua_palabras"))] or base["agua_palabras"],
               "agua_excepciones": [t.lower() for t in textos(R.get("agua_excepciones"))]}
     dev = R.get("devoluciones") or {}

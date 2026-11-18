@@ -73,8 +73,11 @@ def test_cupones_de_empresa_se_separan_de_las_devoluciones(lecturas):
     assert [c["id_maquina"] for c in r["cupones"] if c["de_empresa"]] == ["208"]
     total = sum(c["valor"] for c in r["cupones"])
     vendidos = sum(c["valor"] for c in r["cupones"] if c["de_empresa"])
-    assert r["pasos"]["cupones_empresa"]["total"] == pytest.approx(vendidos, abs=0.02)
-    assert r["pasos"]["devoluciones"]["total"] == pytest.approx(total - vendidos, abs=0.02)
+    p = r["pasos"]
+    # por defecto los de empresa no cuentan: ni venta ni devolucion; solo restan los de reembolso
+    assert p["cupones_empresa"]["total"] == 0 and p["cupones_empresa_fuera"] == pytest.approx(vendidos, abs=0.02)
+    assert p["devoluciones"]["total"] == pytest.approx(total - vendidos, abs=0.02)
+    assert p["neto"]["total"] == pytest.approx(p["ventas"]["total"] - (total - vendidos), abs=0.02)
 
 
 def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):

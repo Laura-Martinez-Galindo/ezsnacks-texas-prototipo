@@ -4,6 +4,7 @@
   "tasa_compras": 6.25,
   "descuento_a_tiempo_pct": 0.5,
   "cupones_empresa_minimo": 100,
+  "cupones_empresa_cuentan": false,
   "devoluciones": {
     "metodo": "cupones",
     "porcentaje": 3.0
