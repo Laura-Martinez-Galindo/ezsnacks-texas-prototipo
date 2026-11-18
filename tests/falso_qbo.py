@@ -11,6 +11,7 @@ class Falso:
         if e=="TaxAgency": return [{"Id":"1","DisplayName":"Texas State Comptroller"}]
         if e=="SalesReceipt": return list(s.recibos.values())
         if e=="Item":
+            if "where" not in sql.lower(): return list(s.items.values())
             if "NonInventory" in sql: return [it for it in s.items.values() if it["Type"]=="NonInventory"]
             nombre=sql.split("'")[-2]
             return [it for it in s.items.values() if it["Name"]==nombre and ("Active = false" not in sql)]

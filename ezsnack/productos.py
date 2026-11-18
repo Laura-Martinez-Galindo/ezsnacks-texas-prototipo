@@ -126,3 +126,75 @@ def buscar_pagados(lista: list[str], vendidos: pd.DataFrame) -> pd.DataFrame:
         if not hallados:
             filas.append({"buscado": buscado, "producto": None, "ventas": 0.0, "estado": "sin_ventas"})
     return pd.DataFrame(filas, columns=["buscado", "producto", "ventas", "estado"])
+
+
+# ---------------- nombres distintos del mismo producto ----------------
+# Palabras que cada sistema agrega o quita sin que cambie el producto ("Coke Classic Can" = "Classic Coke")
+RELLENO = {"can", "cans", "bottle", "bottles", "drink", "drinks", "original", "classic", "chip", "chips", "bar",
+           "candy", "meal", "snack", "entree", "soda", "bag", "sandwich", "variety", "pk", "ltd", "instant", "lunch",
+           "energy", "milk", "chocolate"}
+
+
+def _singular(t: str) -> str:
+    return t[:-1] if len(t) > 3 and t.endswith("s") else t
+
+
+_RELLENO = {_singular(t) for t in RELLENO}
+
+
+def _fichas(nombre: str) -> set[str]:
+    return {_singular(t) for t in palabras(nombre)}
+
+
+def mismo_producto(a: str, b: str) -> bool:
+    """True si dos nombres parecen el mismo producto escrito distinto por dos sistemas.
+
+    Las palabras que distinguen un producto (Zero, Diet, el sabor) tienen que estar en los dos
+    nombres; solo puede sobrar relleno como Can, Classic o Drink. El tamano tiene que ser el mismo.
+    """
+    if a == b:
+        return False
+    ta, tb = _fichas(a), _fichas(b)
+    if not ta or not tb or not (ta & tb):
+        return False
+    sa, sb = tamano(a), tamano(b)
+    if sa and sb and sa != sb:
+        return False
+    return (ta ^ tb) <= _RELLENO
+
+
+def sugerir_equivalencias(ventas: dict[str, float], unidos: dict[str, str] | None = None,
+                          descartados: set | None = None) -> list[dict]:
+    """Pares de nombres que pueden ser el mismo producto, para que el usuario los confirme.
+
+    ventas: nombre -> lo vendido (el mas vendido queda como nombre principal). No se proponen
+    pares ya unidos o descartados, ni un nombre sin tamano que se parece a dos tamanos distintos
+    ("Coke" con "Coke 12 oz" y "Coke 16.9 oz"), porque no se sabe cual es.
+    """
+    unidos, descartados = unidos or {}, descartados or set()
+    nombres = sorted(n for n in ventas if n not in unidos)
+    candidatos: dict[str, list[str]] = {}
+    pares = []
+    for i, a in enumerate(nombres):
+        for b in nombres[i + 1:]:
+            if frozenset((a, b)) in descartados or not mismo_producto(a, b):
+                continue
+            pares.append((a, b))
+            candidatos.setdefault(a, []).append(b)
+            candidatos.setdefault(b, []).append(a)
+
+    def ambiguo(n: str) -> bool:
+        if tamano(n):
+            return False
+        tamanos = {tamano(x) for x in candidatos.get(n, []) if tamano(x)}
+        return len(tamanos) > 1
+
+    salida = []
+    for a, b in pares:
+        if ambiguo(a) or ambiguo(b):
+            continue
+        principal, otro = (a, b) if ventas.get(a, 0) >= ventas.get(b, 0) else (b, a)
+        salida.append({"alias": otro, "producto": principal,
+                       "ventas_alias": round(float(ventas.get(otro, 0)), 2),
+                       "ventas_producto": round(float(ventas.get(principal, 0)), 2)})
+    return sorted(salida, key=lambda x: (x["producto"].lower(), x["alias"].lower()))

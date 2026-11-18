@@ -91,6 +91,14 @@ Las reglas no quedan solo en la aplicación: se migran a cualquier QuickBooks qu
 
 Cada recibo trae un renglón por producto; los comprados con impuesto ya pagado van ese mes con el código NON, las devoluciones (los cupones de reembolso del mes) son un renglón negativo y los cupones que compran las empresas un renglón gravable. Así QuickBooks decide con sus propios items y códigos qué es gravable y cuánto impuesto cobra, y si alguien registra una venta a mano en QuickBooks, el agua ya sale sin impuesto.
 
+## Si QuickBooks ya tenía los productos
+
+Antes de crear un item, la aplicación busca si la empresa ya lo tiene, sea de inventario, de servicio o no inventariable: por el nombre, por los otros nombres con que lo traen los sistemas y por un nombre que sea el mismo producto escrito distinto. Si lo encuentra, usa ese item y solo le corrige la marca de gravable; no crea otro. Al terminar dice cuántos ya existían y cuáles se reconocieron por un nombre parecido.
+
+## El mismo producto con nombres distintos
+
+Cada sistema de ventas escribe los productos a su manera: "12oz - Coke Classic Can" en Nayax y "Coke Classic - 12 oz. can" en otro. En Configuración, Productos, la aplicación propone los pares que parecen el mismo producto: las palabras que distinguen un producto, como Zero o Diet, tienen que estar en los dos nombres, y el tamaño tiene que ser el mismo. La persona une o descarta cada par. Los nombres unidos cuentan como un solo producto en el catálogo, en el Excel y en QuickBooks, y lo que se marque con cualquiera de los dos nombres vale para el producto. Unir nombres no cambia el impuesto.
+
 ## Devoluciones a clientes
 
 Es una regla que se cambia en Configuración. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan. Por defecto las devoluciones son los cupones de reembolso del mes, y agua es todo producto cuyo nombre diga water, también el endulzado, como lo filtra el gerente. Las dos cosas se cambian en Configuración.

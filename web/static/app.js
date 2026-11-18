@@ -195,6 +195,7 @@ async function empezar(origen) {
   mostrar(d);
   $$(".paso").forEach((p) => (p.disabled = false));
   avisar(`${d.archivos.length} reportes, ${entero(d.maquinas.length)} máquinas.`);
+  if (!d.ejemplo) cargarConfig().catch(() => {});
   const g = d.maquinas_guardadas;
   if (g && (g.nuevas || g.cambiadas)) { avisar(`Lista de máquinas guardada: ${g.nuevas} nuevas y ${g.cambiadas} con cambios.`); cargarEstado(); cargarConfig(); }
 }
@@ -665,7 +666,7 @@ function pintarConfig() {
   verCamposDev();
   const v = R._version;
   $("#cfg-version").textContent = v ? `Reglas vigentes: aplican desde ${v.desde}, guardadas por ${v.por || "la instalación"} el ${fecha(v.creado)}. Hay ${c.versiones.length} versiones guardadas.` : "";
-  pintarCatalogo(); pintarCfgMaquinas(); pintarFormatos(); pintarUsuarios(); pintarBitacora();
+  pintarCatalogo(); pintarSugerencias(); pintarCfgMaquinas(); pintarFormatos(); pintarUsuarios(); pintarBitacora();
 }
 
 function reglasDelFormulario() {
@@ -712,7 +713,7 @@ function pintarCatalogo() {
   const filas = todas.filter((f) => !q || f.nombre.toLowerCase().includes(q));
   if (!filas.length) { el.innerHTML = `<tbody><tr><td>Todavía no hay productos clasificados a mano. Se guardan solos cuando se marcan en el paso 2.</td></tr></tbody>`; return; }
   tabla(el, [
-    { t: "Producto", v: (f) => f.nombre },
+    { t: "Producto", html: (f) => `${esc(f.nombre)}${f.otros_nombres?.length ? `<span class="sub">También: ${f.otros_nombres.map((o) => `${esc(o)} <button class="enlace" data-separar="${esc(o)}">separar</button>`).join(" · ")}</span>` : ""}` },
     { t: "Impuesto", html: (f) => `<select data-cat="${esc(f.nombre)}" aria-label="Impuesto de ${esc(f.nombre)}" ${soloOperador()}>
         <option value="auto" ${f.exento == null ? "selected" : ""}>Automático: ${f.regla_agua ? "agua, sin impuesto" : "con impuesto"}</option>
         <option value="exento" ${f.exento === true ? "selected" : ""}>Sin impuesto (agua)</option>
@@ -739,6 +740,28 @@ $("#btn-prod-nuevo").addEventListener("click", () => {
   if (!nombre) { avisar("Escriba el nombre del producto.", true); return; }
   $("#prod-nuevo").value = "";
   clasificar({ nombre, exento: true });
+});
+
+/* nombres del mismo producto */
+function pintarSugerencias() {
+  const el = $("#tabla-sugerencias"); if (!el || !estado.cfg) return;
+  const S = estado.cfg.sugerencias_nombres || [];
+  if (!S.length) { el.innerHTML = `<tbody><tr><td>No hay nombres por revisar. Suba los reportes de un mes para ver sugerencias.</td></tr></tbody>`; return; }
+  tabla(el, [
+    { t: "Nombre en un sistema", v: (f) => f.alias },
+    { t: "Parece el mismo que", html: (f) => `<strong>${esc(f.producto)}</strong>` },
+    { t: "", html: (f) => (puede("operador") ? `<button class="enlace" data-unir="${esc(f.alias)}" data-a="${esc(f.producto)}">Unir</button> <button class="enlace" data-distinto="${esc(f.alias)}" data-a="${esc(f.producto)}">No es el mismo</button>` : "") },
+  ], S, ["", `${S.length} por revisar`, ""]);
+}
+document.addEventListener("click", async (ev) => {
+  const u = ev.target.closest("[data-unir], [data-distinto], [data-separar]");
+  if (!u) return;
+  try {
+    if (u.dataset.separar !== undefined) await postJSON("/api/config/equivalencias/separar", { alias: u.dataset.separar, producto: "" });
+    else await postJSON("/api/config/equivalencias", { alias: u.dataset.unir ?? u.dataset.distinto, producto: u.dataset.a, unir: u.dataset.unir !== undefined });
+    await cargarConfig();
+    if (estado.codigo) recalcular();
+  } catch (e) { avisar(e.message, true); }
 });
 
 /* maquinas */
