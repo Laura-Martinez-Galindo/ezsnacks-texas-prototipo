@@ -1,11 +1,11 @@
 {
-  "_nota": "Reglas del cierre mensual de EzSnack Texas. Siguen el proceso del gerente: 3 % fijo de devoluciones (su Excel multiplica por 0.97) y agua = todo producto que diga water.",
+  "_nota": "Reglas del cierre mensual de EzSnack Texas. Devoluciones: los cupones de reembolso del mes (los que compran las empresas son venta). Agua: todo producto que diga water, como lo filtra el gerente.",
   "tasa_estado": 6.25,
   "tasa_compras": 6.25,
   "descuento_a_tiempo_pct": 0.5,
   "cupones_empresa_minimo": 100,
   "devoluciones": {
-    "metodo": "porcentaje",
+    "metodo": "cupones",
     "porcentaje": 3.0
   },
   "jurisdicciones": {

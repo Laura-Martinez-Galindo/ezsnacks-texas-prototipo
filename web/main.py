@@ -208,8 +208,9 @@ def callback(request: Request, code: str = "", realmId: str = "", state: str = "
     # Al conectar se deja la empresa con las reglas de impuestos de EzSnack (tasas, productos, cliente)
     reglas_ok = "ok"
     try:
-        conta.preparar(qbo_mod.QBO(tokens), cie.reglas())
-        alm.anotar(u["nombre"], "Conectó QuickBooks", "Quedaron creadas las tasas, los productos, el cliente y la cuenta.")
+        migrado = conta.preparar(qbo_mod.QBO(tokens), cie.reglas(), alm.productos())
+        alm.anotar(u["nombre"], "Conectó QuickBooks", f"Se migraron las reglas: {len(migrado['tasas'])} códigos de impuesto y "
+                   f"{migrado['catalogo']['en_quickbooks']} productos ({migrado['catalogo']['agua']} de agua, no gravables).")
     except Exception:  # noqa: BLE001  la conexion sirve igual; la pagina lo vuelve a intentar
         reglas_ok = "pendiente"
     resp = RedirectResponse(f"/?conexion=ok&reglas={reglas_ok}")
@@ -255,8 +256,10 @@ def estado(request: Request):
 # ---------------- configuracion de la empresa ----------------
 @app.get("/api/config")
 def ver_config(u: dict = CONSULTA):
-    return {"reglas": cie.reglas(), "base": alm.reglas_base(), "versiones": alm.versiones_reglas(),
-            "maquinas": alm.maquinas(), "productos": alm.productos(), "formatos": alm.formatos(),
+    R = cie.reglas()
+    catalogo = {p: {**c, "regla_agua": prod.es_exento(p, R)} for p, c in alm.productos().items()}
+    return {"reglas": R, "base": alm.reglas_base(), "versiones": alm.versiones_reglas(),
+            "maquinas": alm.maquinas(), "productos": catalogo, "formatos": alm.formatos(),
             "usuarios": alm.listar_usuarios() if u["rol"] == "admin" else [], "bitacora": alm.bitacora(),
             "almacen": alm.info()}
 
@@ -475,6 +478,7 @@ async def subir(anio: int, mes: int, maquinas: UploadFile | None = File(default=
         return JSONResponse({"detail": "No se pudo leer ningún reporte.", "sin_leer": datos["sin_leer"],
                              "campos": lec.NOMBRES_CAMPOS}, status_code=422)
     datos["ejemplo"] = False
+    alm.registrar_productos(datos["integ"]["producto"].unique())   # el catalogo crece con lo que se vende
     if lista is not None:       # el vendor list que se sube queda guardado para los meses siguientes
         datos["maquinas_guardadas"] = alm.guardar_maquinas(datos["maquinas"].to_dict("records"), u["nombre"])
     codigo = _guardar(datos)
@@ -551,7 +555,7 @@ def ver_tasas(request: Request, u: dict = OPERADOR):
     if not tokens:
         raise HTTPException(400, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
-    resp = JSONResponse({**conta.preparar(qbo, cie.reglas()), "empresa": qbo.info_empresa().get("CompanyName")})
+    resp = JSONResponse({**conta.preparar(qbo, cie.reglas(), alm.productos()), "empresa": qbo.info_empresa().get("CompanyName")})
     if qbo.renovado:
         _poner_cookie(resp, qbo.tokens)
     return resp

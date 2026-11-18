@@ -327,14 +327,27 @@ def marcar_producto(nombre: str, usuario: str, **cambios) -> None:
                                                       actualizado=_ahora(), **{"pagado_habitual": False, **valores}))
         else:
             nuevo = {"exento": previa["exento"], "pagado_habitual": previa["pagado_habitual"], **valores}
-            if nuevo["exento"] is None and not nuevo["pagado_habitual"]:
-                c.execute(productos_t.delete().where(productos_t.c.id == previa["id"]))   # volvio a lo automatico
-            else:
-                c.execute(productos_t.update().where(productos_t.c.id == previa["id"])
-                          .values(actualizado_por=usuario, actualizado=_ahora(), **valores))
+            c.execute(productos_t.update().where(productos_t.c.id == previa["id"])
+                      .values(actualizado_por=usuario, actualizado=_ahora(), **valores))
     textos = {"exento": {True: "sin impuesto", False: "con impuesto", None: "automático"},
               "pagado_habitual": {True: "se compra por fuera", False: "ya no se compra por fuera"}}
     anotar(usuario, "Clasificó un producto", f"{nombre}: " + ", ".join(textos[k][v] for k, v in valores.items()))
+
+
+def registrar_productos(nombres) -> int:
+    """Agrega al catalogo los productos vendidos que todavia no estaban, en automatico.
+
+    Asi el catalogo tiene todos los productos de la empresa y, al conectar un QuickBooks nuevo,
+    se le pueden crear todos con su marca de gravable sin esperar al primer envio.
+    """
+    nombres = {str(n).strip()[:200] for n in nombres if str(n).strip()}
+    with motor().begin() as c:
+        ya = {f[0] for f in c.execute(sa.select(productos_t.c.nombre).where(productos_t.c.empresa_id == EMPRESA))}
+        nuevos = sorted(nombres - ya)
+        if nuevos:
+            c.execute(productos_t.insert(), [{"empresa_id": EMPRESA, "nombre": n, "exento": None, "pagado_habitual": False,
+                                              "actualizado_por": "Reportes de ventas", "actualizado": _ahora()} for n in nuevos])
+    return len(nuevos)
 
 
 # ---------------- sistemas de ventas ----------------
