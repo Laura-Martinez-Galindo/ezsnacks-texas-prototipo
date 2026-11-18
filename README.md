@@ -91,9 +91,17 @@ Las reglas no quedan solo en la aplicación: se migran a cualquier QuickBooks qu
 
 Cada recibo trae un renglón por producto; los comprados con impuesto ya pagado van ese mes con el código NON, las devoluciones (los cupones de reembolso del mes) son un renglón negativo y los cupones que compran las empresas un renglón gravable. Así QuickBooks decide con sus propios items y códigos qué es gravable y cuánto impuesto cobra, y si alguien registra una venta a mano en QuickBooks, el agua ya sale sin impuesto.
 
-## Si QuickBooks ya tenía los productos
+## Lo que la aplicación puede tocar en QuickBooks
 
-Antes de crear un item, la aplicación busca si la empresa ya lo tiene, sea de inventario, de servicio o no inventariable: por el nombre, por los otros nombres con que lo traen los sistemas y por un nombre que sea el mismo producto escrito distinto. Si lo encuentra, usa ese item y solo le corrige la marca de gravable; no crea otro. Al terminar dice cuántos ya existían y cuáles se reconocieron por un nombre parecido.
+Nada de lo que la empresa ya tenía se modifica. La aplicación solo crea lo suyo: la agencia de impuestos si no existe, sus códigos de impuesto, sus items (marcados "EzSnack Impuestos" en la descripción), el cliente, la cuenta de ingresos y un recibo de venta por máquina y mes. Después solo actualiza lo que ella misma creó. No toca facturas, pagos, bancos, nómina, proveedores ni gastos, no reactiva registros inactivos y nunca borra.
+
+Eso no depende solo de que el código esté bien escrito: el cliente de QuickBooks (ezsnack/qbo.py) tiene un candado que revisa cada escritura antes de enviarla y bloquea cualquier cosa fuera de esa lista, o cualquier cambio a un registro que la aplicación no creó. El candado solo se abre para limpiar la empresa de prueba.
+
+Antes de crear un item, la aplicación busca si la empresa ya lo tiene, sea de inventario, de servicio o no inventariable: por el nombre, por los otros nombres con que lo traen los sistemas y por un nombre que sea el mismo producto escrito distinto. Si lo encuentra, lo usa tal como está, sin cambiarle la marca de gravable. Como cada renglón del recibo dice si paga impuesto, el agua sale sin impuesto en los recibos de la aplicación aunque el item de la empresa diga otra cosa. Al terminar dice cuáles productos ya existían con otra marca y no se tocaron.
+
+Si la empresa ya tiene un recibo con el mismo número que usaría la aplicación, ese recibo no se toca y se avisa.
+
+Hay que confirmar con el contador cómo se registran hoy las ventas de las máquinas: si ya entran a QuickBooks de otra forma (por ejemplo con los depósitos de los lectores), los recibos de la aplicación duplicarían el ingreso.
 
 ## El mismo producto con nombres distintos
 

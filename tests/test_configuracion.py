@@ -203,7 +203,9 @@ def test_quickbooks_que_ya_tenia_los_productos_no_los_duplica():
     viejo = q.crear("Item", {"Name": gravable + " Can", "Type": "Service", "Taxable": True})
     almacen.registrar_productos(integ["producto"].unique())
     m = contabilidad.preparar(q, almacen.reglas(), almacen.productos())
-    assert q.items[viejo_agua["Id"]]["Taxable"] is False            # se corrigio la marca, no se creo otro
+    assert q.items[viejo_agua["Id"]]["Taxable"] is True             # el item de la empresa no se toca
+    assert q.items[viejo_agua["Id"]]["Type"] == "Inventory"
+    assert [x for x in m["catalogo"]["sin_tocar"] if x["item"] == agua.upper() and x["regla"] == "no gravable"]
     assert not [i for i in q.items.values() if i["Name"].lower() == agua.lower() and i["Id"] != viejo_agua["Id"]]
     assert not [i for i in q.items.values() if i["Name"] == contabilidad.nombre_item(gravable)]
     assert {"producto": gravable, "item": gravable + " Can"} in m["catalogo"]["reutilizados"]
@@ -235,3 +237,53 @@ def test_unir_nombres_cuenta_como_un_producto():
     assert a not in cfg["productos"] and a in cfg["productos"][b]["otros_nombres"]
     c.post("/api/config/equivalencias/separar", json={"alias": a, "producto": b})
     assert a in c.get("/api/config").json()["productos"]
+
+
+
+def test_el_agua_sale_sin_impuesto_aunque_el_item_de_la_empresa_diga_gravable():
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    _, integ = _integ()
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    q = Falso()
+    for p in r["lista_exentos"]:
+        q.crear("Item", {"Name": contabilidad.nombre_item(p), "Type": "Inventory", "Taxable": True})
+    antes = {i: dict(it) for i, it in q.items.items()}
+    e = contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], r["reglas"], r["detalle"])
+    assert e["cuadra"]
+    assert all(q.items[i] == it for i, it in antes.items())          # ninguno cambio
+
+
+def test_recibo_de_la_empresa_con_el_mismo_numero_no_se_toca():
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    _, integ = _integ()
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    q = Falso()
+    primero = r["maquinas"].iloc[0]
+    num = f"V2609-{primero['id_maquina']}"
+    q.recibos[num] = {"Id": "9999", "SyncToken": "3", "DocNumber": num, "TxnDate": "2026-09-30", "PrivateNote": "Venta de Humberto",
+                      "Line": []}
+    e = contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], r["reglas"], r["detalle"])
+    assert q.recibos[num]["PrivateNote"] == "Venta de Humberto"
+    assert any(x["recibo"] == num for x in e["errores"])
+
+
+def test_candado_del_cliente_quickbooks():
+    from ezsnack.qbo import QBO, Bloqueado
+    q = QBO({"access_token": "x", "refresh_token": "x", "realm_id": "1", "expira_en": 9e12})
+    q.revisar("POST", "salesreceipt", None, {"Line": []})                     # crear un recibo: si
+    q.revisar("POST", "taxservice/taxcode", None, {"TaxCode": "EzSnack X"})   # crear un codigo de impuesto: si
+    for metodo, ruta, params, cuerpo in [
+        ("POST", "item", None, {"Id": "5", "SyncToken": "0", "Taxable": False}),          # editar un item ajeno
+        ("POST", "salesreceipt", {"operation": "delete"}, {"Id": "7", "SyncToken": "0"}),  # borrar
+        ("POST", "invoice", None, {"Line": []}),                                           # otro modulo
+        ("POST", "companyinfo", None, {"Id": "1", "SyncToken": "0", "CompanyName": "x"}),
+        ("POST", "batch", None, {"BatchItemRequest": [{"bId": "1", "operation": "update", "Customer": {"Id": "3"}}]}),
+    ]:
+        with pytest.raises(Bloqueado):
+            q.revisar(metodo, ruta, params, cuerpo)
+    q.marcar_propio("Item", "5")
+    q.revisar("POST", "item", None, {"Id": "5", "SyncToken": "0", "Taxable": False})   # uno propio: si
