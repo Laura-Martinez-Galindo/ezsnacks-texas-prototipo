@@ -698,7 +698,9 @@ $("#form-reglas").addEventListener("submit", (ev) => {
     if (estado.conectado && r.reglas.contabilidad.destino === "quickbooks") {
       try {
         const t = await api("/api/quickbooks/tasas"); estado.tasas = t.tasas; pintarComo();
-        avisar(`Las reglas nuevas se migraron a QuickBooks: ${Object.keys(t.tasas).length} códigos de impuesto y ${t.catalogo.en_quickbooks} productos, ${t.catalogo.agua} de ellos agua sin impuesto.`);
+        const st = t.catalogo.sin_tocar?.length || 0;
+        avisar(`Las reglas nuevas se migraron a QuickBooks: ${Object.keys(t.tasas).length} códigos de impuesto y ${t.catalogo.en_quickbooks} productos, ${t.catalogo.agua} de ellos agua sin impuesto.`
+          + (st ? ` ${st} productos que la empresa ya tenía con otra marca no se tocaron; en los recibos de la aplicación igual salen con la regla correcta.` : ""));
       }
       catch (e) { avisar(`Las reglas se guardaron, pero QuickBooks no se pudo actualizar: ${e.message}`, true); }
     }

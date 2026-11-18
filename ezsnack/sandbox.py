@@ -32,6 +32,7 @@ def _lotes(qbo: QBO, pedidos: list[dict]) -> int:
 def limpiar(qbo: QBO) -> dict:
     if not es_sandbox():
         raise RuntimeError("Solo funciona en la empresa de prueba.")
+    qbo.sin_candado = True     # solo aqui, y solo en la empresa de prueba
     resumen = {"borradas": {}, "inactivados": {}, "no_se_pudo": 0}
     for entidad in TRANSACCIONES:
         filas = qbo.query(f"select * from {entidad}")

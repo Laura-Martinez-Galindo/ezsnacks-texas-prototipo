@@ -4,6 +4,7 @@ class Falso:
     renovado=False
     def __init__(s): s.rates={}; s.codes={}; s.n=100; s.recibos={}; s.items={}; s.cuentas={}; s.otros={}
     def _id(s): s.n+=1; return str(s.n)
+    def marcar_propio(s,e,i): s.__dict__.setdefault("propios",{}).setdefault(e,set()).add(str(i))
     def query(s,sql):
         e=sql.split()[3]
         if e=="TaxRate": return [{"Id":i,"Name":n,"RateValue":v} for n,(i,v) in s.rates.items()]

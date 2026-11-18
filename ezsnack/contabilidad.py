@@ -13,6 +13,10 @@ dejar que el impuesto automatico decida por la direccion:
     EzSnack Houston MTA   6.25 % estado + 1 % MTA
     EzSnack solo estado   6.25 % estado
 
+Nada de lo que la empresa ya tenia en QuickBooks se modifica: la aplicacion solo crea lo suyo (con
+la marca "EzSnack Impuestos") y solo actualiza lo que ella misma creo. El cliente QBO tiene un
+candado que bloquea cualquier otra escritura (ver qbo.py).
+
 Las reglas del cierre quedan dentro de QuickBooks, no solo en la aplicacion:
 
     jurisdicciones   cada una es un tax code con la tasa del estado y la local
@@ -27,6 +31,7 @@ recibos se actualizan en vez de duplicarse.
 """
 from __future__ import annotations
 
+import re
 from calendar import monthrange
 from datetime import date
 
@@ -48,6 +53,18 @@ ITEMS = {
 }
 LOTE = 25
 LOTE_ITEMS = 30
+MARCA = "EzSnack Impuestos"
+DESC_ITEM = f"Producto de máquina expendedora · {MARCA}"
+NOTA = f"[{MARCA}]"
+
+
+def es_propio_item(it: dict) -> bool:
+    return str(it.get("Description") or "").startswith("Producto de máquina expendedora")
+
+
+def es_propio_recibo(r: dict) -> bool:
+    nota = str(r.get("PrivateNote") or "")
+    return nota.startswith(NOTA) or bool(re.match(r"Ventas \d\d/\d{4} de ", nota))   # los de antes de la marca
 
 
 def _esc(t: str) -> str:
@@ -55,12 +72,13 @@ def _esc(t: str) -> str:
 
 
 def _asegurar(qbo: QBO, entidad: str, campo: str, nombre: str, cuerpo: dict) -> dict:
+    """Usa el registro activo con ese nombre tal como esta, o crea uno. Nunca modifica ni reactiva nada."""
     filas = qbo.query(f"select * from {entidad} where {campo} = '{_esc(nombre)}'")
-    if not filas and entidad != "Account":
-        filas = qbo.query(f"select * from {entidad} where Active = false and {campo} = '{_esc(nombre)}'")
-        if filas:
-            return qbo.actualizar(entidad, {"Id": filas[0]["Id"], "SyncToken": filas[0]["SyncToken"], "Active": True})
-    return filas[0] if filas else qbo.crear(entidad, cuerpo)
+    if filas:
+        return filas[0]
+    nuevo = qbo.crear(entidad, cuerpo)
+    qbo.marcar_propio(entidad, nuevo.get("Id"))
+    return nuevo
 
 
 def _agencia(qbo: QBO) -> str:
@@ -137,14 +155,28 @@ def _nombres(R: dict | None) -> tuple[str, str]:
     return conta.get("cuenta") or CUENTA_INGRESOS, conta.get("cliente") or CLIENTE
 
 
+def _item_propio(qbo: QBO, nombre: str, gravable: bool, cuenta: str) -> dict:
+    """Un item de la aplicacion (devoluciones, cupones...). Si la empresa ya tenia uno con ese nombre
+    y otra marca de gravable, no se toca: se crea otro con "(EzSnack)" al final."""
+    for candidato in (nombre, f"{nombre} (EzSnack)"):
+        filas = qbo.query(f"select * from Item where Name = '{_esc(candidato)}'")
+        if filas and bool(filas[0].get("Taxable")) == gravable:
+            return filas[0]
+        if not filas:
+            nuevo = qbo.crear("Item", {"Name": candidato, "Type": "Service", "Taxable": gravable,
+                                       "Description": MARCA, "IncomeAccountRef": {"value": cuenta}})
+            qbo.marcar_propio("Item", nuevo.get("Id"))
+            return nuevo
+    raise QBOError(f"Ya existen los productos {nombre} y {nombre} (EzSnack) con otra marca de impuesto.")
+
+
 def _preparar(qbo: QBO, R: dict | None = None) -> tuple[str, dict[str, str], dict[str, str]]:
     n_cuenta, n_cliente = _nombres(R)
     cuenta = _asegurar(qbo, "Account", "Name", n_cuenta, {"Name": n_cuenta, "AccountType": "Income"})["Id"]
     cliente = _asegurar(qbo, "Customer", "DisplayName", n_cliente, {"DisplayName": n_cliente})["Id"]
     items = {}
     for clave, (nombre, gravable) in ITEMS.items():
-        items[clave] = _asegurar(qbo, "Item", "Name", nombre, {
-            "Name": nombre, "Type": "Service", "Taxable": gravable, "IncomeAccountRef": {"value": cuenta}})["Id"]
+        items[clave] = _item_propio(qbo, nombre, gravable, cuenta)["Id"]
     return cliente, items, tasas(qbo, R=R)
 
 
@@ -167,11 +199,8 @@ def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None,
     cliente = _asegurar(qbo, "Customer", "DisplayName", n_cliente, {"DisplayName": n_cliente})
     productos = []
     for _, (nombre, gravable) in ITEMS.items():
-        it = _asegurar(qbo, "Item", "Name", nombre, {
-            "Name": nombre, "Type": "Service", "Taxable": gravable, "IncomeAccountRef": {"value": cuenta["Id"]}})
-        if bool(it.get("Taxable")) != gravable:   # alguien le cambio la marca en QuickBooks: se corrige
-            it = qbo.actualizar("Item", {"Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable})
-        productos.append({"nombre": nombre, "gravable": gravable, "id": it["Id"]})
+        it = _item_propio(qbo, nombre, gravable, cuenta["Id"])
+        productos.append({"nombre": it.get("Name"), "gravable": gravable, "id": it["Id"]})
     codigos, resumen = tasas(qbo, detalle=True, R=R)
     catalogo_qbo = {"en_quickbooks": 0, "creados": 0, "cambiados": 0, "agua": 0, "errores": []}
     if catalogo:
@@ -198,7 +227,10 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
     alias: producto -> otros nombres con que lo traen los sistemas de ventas.
 
     Si la empresa ya tenia el producto en QuickBooks, se usa ese item (sea de inventario, de
-    servicio o no inventariable) y solo se le corrige la marca de gravable; no se crea otro. Se
+    servicio o no inventariable) tal como esta: no se le cambia nada, ni la marca de gravable. En
+    los recibos de la aplicacion cada renglon dice si paga impuesto, asi que el agua sale sin
+    impuesto aunque el item de la empresa diga otra cosa. Solo se corrige la marca de los items
+    que creo la aplicacion. Se
     busca por el nombre, por los otros nombres del producto y, si nada coincide, por un nombre
     parecido que sea el mismo producto (por ejemplo "Ozarka Water 20 oz" y "Ozarka water 20oz").
     """
@@ -211,7 +243,10 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
     for producto in gravables:   # QuickBooks no distingue mayusculas: "Ozarka water" y "Ozarka Water" son un item
         grupos.setdefault(nombre_item(producto).lower(), []).append(producto)
     usados = set()
-    ids, pedidos, de_pedido, reutilizados = {}, [], {}, []
+    for it in todos:
+        if es_propio_item(it):
+            qbo.marcar_propio("Item", it["Id"])
+    ids, pedidos, de_pedido, reutilizados, sin_tocar = {}, [], {}, [], []
     nuevos = cambiados = existian = 0
     for clave, productos in grupos.items():
         gravable = all(gravables[p] for p in productos)   # si uno de los nombres es agua, el item es agua
@@ -225,7 +260,7 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
             bid = f"n{len(pedidos)}"
             pedidos.append({"bId": bid, "operation": "create", "Item": {
                 "Name": nombre_item(productos[0]), "Type": "NonInventory", "Taxable": gravable,
-                "Description": "Producto de máquina expendedora", "IncomeAccountRef": {"value": cuenta}}})
+                "Description": DESC_ITEM, "IncomeAccountRef": {"value": cuenta}}})
             de_pedido[bid] = productos
             nuevos += 1
             continue
@@ -234,7 +269,10 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
         ids.update({p: it["Id"] for p in productos})
         if str(it.get("Name", "")).lower() != clave:
             reutilizados.append({"producto": productos[0], "item": it.get("Name")})
-        if bool(it.get("Taxable")) != gravable:
+        if bool(it.get("Taxable")) != gravable and not es_propio_item(it):
+            sin_tocar.append({"producto": productos[0], "item": it.get("Name"), "en_quickbooks": "gravable" if it.get("Taxable") else "no gravable",
+                              "regla": "gravable" if gravable else "no gravable"})
+        elif bool(it.get("Taxable")) != gravable:
             pedidos.append({"bId": f"c{len(pedidos)}", "operation": "update", "Item": {
                 "Id": it["Id"], "SyncToken": it["SyncToken"], "Taxable": gravable, "sparse": True}})
             cambiados += 1
@@ -243,12 +281,14 @@ def sincronizar_productos(qbo: QBO, gravables: dict[str, bool], cuenta: str,
         resp = qbo._peticion("POST", "batch", json_body={"BatchItemRequest": pedidos[i:i + LOTE_ITEMS]})
         for r in resp.get("BatchItemResponse", []):
             if "Item" in r:
+                qbo.marcar_propio("Item", r["Item"]["Id"])
                 for p in de_pedido.get(r["bId"], []):
                     ids[p] = r["Item"]["Id"]
             else:
                 err = (r.get("Fault", {}).get("Error") or [{}])[0]
                 errores.append(f"{err.get('Message', '')} {err.get('Detail', '')}".strip()[:200])
     return ids, {"creados": nuevos, "cambiados": cambiados, "errores": errores, "ya_existian": existian,
+                 "sin_tocar": sin_tocar,
                  "reutilizados": reutilizados}
 
 
@@ -306,7 +346,7 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
     r = {
         "DocNumber": f"V{anio % 100:02d}{mes:02d}-{m['id_maquina'] or 'X'}"[:21],
         "TxnDate": fecha, "CustomerRef": {"value": cliente},
-        "PrivateNote": f"Ventas {mes:02d}/{anio} de {m['maquina']}."[:4000],
+        "PrivateNote": f"{NOTA} Ventas {mes:02d}/{anio} de {m['maquina']}."[:4000],
         "TxnTaxDetail": {"TxnTaxCodeRef": {"value": codigo}},
         "Line": lineas,
     }
@@ -338,7 +378,13 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
     existentes = {r["DocNumber"]: r for r in qbo.query(f"select * from SalesReceipt where TxnDate = '{fecha}'")
                   if str(r.get("DocNumber", "")).startswith(prefijo)}
 
-    pedidos, resumidos = [], 0
+    ajenos = {}
+    for num, r in list(existentes.items()):
+        if es_propio_recibo(r):
+            qbo.marcar_propio("SalesReceipt", r["Id"])
+        else:   # un recibo de la empresa con el mismo numero: no se toca
+            ajenos[num] = existentes.pop(num)
+    pedidos, resumidos, omitidos = [], 0, []
     for _, m in maquinas.iterrows():
         lineas = None
         if prods:
@@ -348,12 +394,15 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
         if r is None:
             continue
         resumidos += lineas is None
+        if r["DocNumber"] in ajenos:
+            omitidos.append({"recibo": r["DocNumber"], "error": "Ya hay un recibo con ese número que no creó la aplicación; no se tocó."})
+            continue
         previo = existentes.get(r["DocNumber"])
         if previo:
             r.update(Id=previo["Id"], SyncToken=previo["SyncToken"], sparse=False)
         pedidos.append({"bId": r["DocNumber"], "operation": "update" if previo else "create", "SalesReceipt": r})
 
-    recibos, errores = [], []
+    recibos, errores = [], list(omitidos)
     for i in range(0, len(pedidos), LOTE):
         lote = pedidos[i:i + LOTE]
         resp = qbo._peticion("POST", "batch", json_body={"BatchItemRequest": lote})
