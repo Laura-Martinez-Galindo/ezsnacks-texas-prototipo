@@ -211,6 +211,50 @@ def preparar(qbo: QBO, R: dict | None = None, catalogo: dict | None = None,
             "cliente": cliente.get("DisplayName"), "cuenta": cuenta.get("Name")}
 
 
+def _fondos_no_depositados(qbo: QBO) -> str | None:
+    """La cuenta Undeposited Funds de la empresa (solo se lee). Los recibos quedan ahi hasta que
+    llega el deposito del lector al banco, que se empareja con ellos en vez de contarse como ingreso."""
+    for c in qbo.query("select * from Account where AccountType = 'Other Current Asset'"):
+        if c.get("AccountSubType") == "UndepositedFunds" and c.get("Active", True):
+            return c["Id"]
+    return None
+
+
+def _filas_pyg(filas: list, en_ingresos: bool = False, salida: list | None = None) -> list:
+    """Recorre el reporte de perdidas y ganancias y devuelve (cuenta, valor) de la seccion Income."""
+    salida = [] if salida is None else salida
+    for f in filas or []:
+        grupo = f.get("group")
+        dentro = en_ingresos or grupo == "Income"
+        if f.get("type") == "Section":
+            _filas_pyg((f.get("Rows") or {}).get("Row"), dentro, salida)
+        elif dentro and f.get("ColData"):
+            col = f["ColData"]
+            try:
+                salida.append((str(col[0].get("value", "")), float(col[-1].get("value") or 0)))
+            except (TypeError, ValueError):
+                pass
+        if grupo == "Income" and f.get("type") == "Section":
+            break
+    return salida
+
+
+def otros_ingresos(qbo: QBO, anio: int, mes: int, R: dict | None = None) -> dict:
+    """Cuanto ingreso tiene ya el mes en QuickBooks en cuentas distintas a la de la aplicacion.
+
+    Solo lee el reporte de perdidas y ganancias. Si las ventas de las maquinas ya entran por otro
+    lado (por ejemplo, registrando como ingreso los depositos de Nayax), enviar los recibos las
+    duplicaria; con esto la pagina avisa antes de enviar.
+    """
+    n_cuenta, _ = _nombres(R)
+    desde, hasta = date(anio, mes, 1).isoformat(), date(anio, mes, monthrange(anio, mes)[1]).isoformat()
+    rep = qbo._peticion("GET", "reports/ProfitAndLoss", params={"start_date": desde, "end_date": hasta,
+                                                                "accounting_method": "Accrual"})
+    cuentas = [{"cuenta": n, "valor": round(v, 2)} for n, v in _filas_pyg((rep.get("Rows") or {}).get("Row"))
+               if abs(v) >= 0.01 and n.strip().lower() != n_cuenta.lower()]
+    return {"desde": desde, "hasta": hasta, "cuentas": cuentas, "total": round(sum(c["valor"] for c in cuentas), 2)}
+
+
 def nombre_item(producto: str) -> str:
     """QuickBooks usa ':' para subproductos y no deja nombres de mas de 100 caracteres."""
     return " ".join(str(producto).replace(":", " -").split())[:100] or "Sin nombre"
@@ -327,7 +371,7 @@ def _recibo_productos(m, filas: pd.DataFrame, cliente: str, items: dict, prods: 
 
 
 def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fecha: str,
-            lineas: list | None = None) -> dict | None:
+            lineas: list | None = None, fondos: str | None = None) -> dict | None:
     resumido = lineas is None
     lineas = [] if lineas is None else lineas
     for clave, (nombre, gravable) in (list(ITEMS.items())[:3] if resumido else []):
@@ -348,6 +392,7 @@ def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fe
         "TxnDate": fecha, "CustomerRef": {"value": cliente},
         "PrivateNote": f"{NOTA} Ventas {mes:02d}/{anio} de {m['maquina']}."[:4000],
         "TxnTaxDetail": {"TxnTaxCodeRef": {"value": codigo}},
+        **({"DepositToAccountRef": {"value": fondos}} if fondos else {}),
         "Line": lineas,
     }
     if m["direccion"] and m["ciudad"]:
@@ -384,13 +429,14 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
             qbo.marcar_propio("SalesReceipt", r["Id"])
         else:   # un recibo de la empresa con el mismo numero: no se toca
             ajenos[num] = existentes.pop(num)
+    fondos = _fondos_no_depositados(qbo)
     pedidos, resumidos, omitidos = [], 0, []
     for _, m in maquinas.iterrows():
         lineas = None
         if prods:
             lineas = _recibo_productos(m, por_maquina.get(m["id_maquina"] or "", pd.DataFrame()), cliente, items,
                                        prods, codigos, anio, mes, fecha)
-        r = _recibo(m, cliente, items, codigos, anio, mes, fecha, lineas)
+        r = _recibo(m, cliente, items, codigos, anio, mes, fecha, lineas, fondos)
         if r is None:
             continue
         resumidos += lineas is None

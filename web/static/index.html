@@ -165,6 +165,15 @@
           </div>
           <button class="boton boton-secundario" id="btn-qbo">Enviar a QuickBooks</button>
         </div>
+        <div class="aviso aviso-alerta" id="aviso-ingresos" hidden>
+          <p><strong>Cuidado: este mes ya tiene ingresos en QuickBooks.</strong> <span id="texto-ingresos"></span></p>
+          <div class="tabla-envoltura"><table class="tabla" id="tabla-ingresos"></table></div>
+          <p>Si esos ingresos son las mismas ventas de las máquinas (por ejemplo, depósitos de Nayax registrados como ingreso), enviar los recibos las contaría dos veces. Los recibos de la aplicación quedan en Fondos no depositados: lo correcto es emparejar esos depósitos con los recibos en vez de registrarlos como ingreso. Si son otros ingresos de la empresa, puede enviar sin problema.</p>
+          <div class="botones">
+            <button class="boton" id="btn-qbo-confirmar">Son otros ingresos: enviar</button>
+            <button class="boton boton-secundario" id="btn-qbo-cancelar">No enviar</button>
+          </div>
+        </div>
         <div class="progreso" id="prog-qbo" hidden><span></span></div>
         <div id="res-qbo" hidden>
           <div class="tabla-envoltura"><table class="tabla" id="tabla-qbo"></table></div>

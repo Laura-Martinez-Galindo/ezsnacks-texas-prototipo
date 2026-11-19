@@ -16,6 +16,7 @@ class Falso:
             if "NonInventory" in sql: return [it for it in s.items.values() if it["Type"]=="NonInventory"]
             nombre=sql.split("'")[-2]
             return [it for it in s.items.values() if it["Name"]==nombre and ("Active = false" not in sql)]
+        if e=="Account" and "AccountType" in sql: return list(s.__dict__.get("activos",[]))
         if e in ("Account","Customer"):
             nombre=sql.split("'")[-2]; x=s.otros.get((e,nombre)); return [x] if x and "Active = false" not in sql else []
         return []

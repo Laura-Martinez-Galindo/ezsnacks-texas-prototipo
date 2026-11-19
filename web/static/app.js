@@ -513,7 +513,11 @@ $("#btn-guardar-cierre").addEventListener("click", () => ocupado($("#btn-guardar
 }));
 
 /* ---------- QuickBooks ---------- */
-$("#btn-qbo").addEventListener("click", () => {
+$("#btn-qbo").addEventListener("click", () => enviarQBO(false));
+$("#btn-qbo-confirmar").addEventListener("click", () => { $("#aviso-ingresos").hidden = true; enviarQBO(true); });
+$("#btn-qbo-cancelar").addEventListener("click", () => { $("#aviso-ingresos").hidden = true; avisar("No se envió nada a QuickBooks."); });
+function enviarQBO(confirmado) {
+  $("#aviso-ingresos").hidden = true;
   const barra = $("#prog-qbo");
   barra.hidden = false;
   let avance = 0;
@@ -523,7 +527,16 @@ $("#btn-qbo").addEventListener("click", () => {
   }, 700);
   ocupado($("#btn-qbo"), async () => {
     try {
-      estado.envio = await postJSON(`/api/cierre/${estado.codigo}/quickbooks`, { anio: estado.anio, mes: estado.mes, ajustes: ajustes() });
+      const r = await postJSON(`/api/cierre/${estado.codigo}/quickbooks`, { anio: estado.anio, mes: estado.mes, ajustes: ajustes(), confirmado });
+      if (r.pendiente) {
+        const o = r.otros_ingresos;
+        $("#texto-ingresos").textContent = `Entre ${o.desde} y ${o.hasta} hay ${dinero(o.total)} de ingresos en cuentas que no son de la aplicación. No se ha enviado nada.`;
+        tabla($("#tabla-ingresos"), [{ t: "Cuenta de ingresos", v: (f) => f.cuenta }, { t: "Valor", num: true, v: (f) => dinero(f.valor) }], o.cuentas);
+        $("#aviso-ingresos").hidden = false;
+        $("#aviso-ingresos").scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      estado.envio = r;
     } catch (e) {
       if (e.status === 410) { await volverASubir(); throw new Error("Se volvieron a leer los archivos. Intente de nuevo."); }
       throw e;
@@ -539,7 +552,7 @@ $("#btn-qbo").addEventListener("click", () => {
     clearInterval(reloj);
     setTimeout(() => { barra.hidden = true; barra.firstElementChild.style.width = "0"; }, 800);
   });
-});
+}
 
 function pintarEnvio() {
   const r = estado.envio;

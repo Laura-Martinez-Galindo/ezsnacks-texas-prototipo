@@ -101,7 +101,7 @@ Antes de crear un item, la aplicación busca si la empresa ya lo tiene, sea de i
 
 Si la empresa ya tiene un recibo con el mismo número que usaría la aplicación, ese recibo no se toca y se avisa.
 
-Hay que confirmar con el contador cómo se registran hoy las ventas de las máquinas: si ya entran a QuickBooks de otra forma (por ejemplo con los depósitos de los lectores), los recibos de la aplicación duplicarían el ingreso.
+Para no contar dos veces el mismo ingreso, los recibos de la aplicación quedan en la cuenta Fondos no depositados (Undeposited Funds). Cuando llega al banco el depósito de Nayax o de otro lector, se empareja con esos recibos en lugar de registrarlo otra vez como ingreso. Además, antes de enviar, la aplicación lee el estado de resultados del mes en QuickBooks: si ya hay ingresos en otras cuentas, muestra cuáles y cuánto, y no envía nada hasta que alguien confirme que son otros ingresos de la empresa. Igual conviene que el contador revise cómo se registran hoy los depósitos de los lectores.
 
 ## El mismo producto con nombres distintos
 

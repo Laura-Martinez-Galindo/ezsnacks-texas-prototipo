@@ -553,6 +553,7 @@ class Pedido(BaseModel):
     anio: int
     mes: int
     ajustes: dict | None = None
+    confirmado: bool = False     # el usuario ya vio el aviso de otros ingresos y decidio enviar
 
 
 @app.post("/api/cierre/{codigo}/calcular")
@@ -627,6 +628,13 @@ def enviar_quickbooks(request: Request, codigo: str, p: Pedido, u: dict = OPERAD
     if not tokens:
         raise HTTPException(400, "Conecte QuickBooks primero.")
     qbo = qbo_mod.QBO(tokens)
+    if not p.confirmado:   # antes de sumar ingresos, ver si el mes ya tiene ventas registradas por otro lado
+        otros = conta.otros_ingresos(qbo, p.anio, p.mes, res["reglas"])
+        if otros["total"] > 0:
+            resp = JSONResponse({"pendiente": True, "otros_ingresos": otros})
+            if qbo.renovado:
+                _poner_cookie(resp, qbo.tokens)
+            return resp
     envio = conta.enviar(qbo, res["maquinas"], p.anio, p.mes, res["declaracion"]["quickbooks_esperado"], res["reglas"],
                          res["detalle"], _alias_por_producto())
     if not c.get("ejemplo"):    # el cierre enviado queda en el historial con lo que respondio QuickBooks
