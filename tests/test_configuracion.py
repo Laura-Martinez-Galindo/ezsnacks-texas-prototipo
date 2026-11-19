@@ -287,3 +287,28 @@ def test_candado_del_cliente_quickbooks():
             q.revisar(metodo, ruta, params, cuerpo)
     q.marcar_propio("Item", "5")
     q.revisar("POST", "item", None, {"Id": "5", "SyncToken": "0", "Taxable": False})   # uno propio: si
+
+
+
+def test_recibos_en_fondos_no_depositados_y_aviso_de_otros_ingresos(monkeypatch):
+    """Los recibos van a Undeposited Funds y, si el mes ya tiene ingresos por otro lado, no se envia sin confirmar."""
+    from tests.falso_qbo import Falso
+
+    from ezsnack import contabilidad
+    _, integ = _integ()
+    r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
+    q = Falso()
+    q.activos = [{"Id": "4", "Name": "Undeposited Funds", "AccountSubType": "UndepositedFunds", "Active": True}]
+    contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], r["reglas"], r["detalle"])
+    assert all(rc["DepositToAccountRef"] == {"value": "4"} for rc in q.recibos.values())
+
+    pyg = {"Rows": {"Row": [
+        {"type": "Section", "group": "Income", "Rows": {"Row": [
+            {"type": "Data", "ColData": [{"value": "Ventas en maquinas"}, {"value": "60000.00"}]},
+            {"type": "Data", "ColData": [{"value": "Nayax deposits"}, {"value": "58000.50"}]}]},
+         "Summary": {"ColData": [{"value": "Total Income"}, {"value": "118000.50"}]}},
+        {"type": "Section", "group": "Expenses", "Rows": {"Row": [
+            {"type": "Data", "ColData": [{"value": "Rent"}, {"value": "900"}]}]}}]}}
+    monkeypatch.setattr(q, "_peticion", lambda *a, **k: pyg, raising=False)
+    o = contabilidad.otros_ingresos(q, 2026, 9, almacen.reglas())
+    assert o["cuentas"] == [{"cuenta": "Nayax deposits", "valor": 58000.5}] and o["total"] == 58000.5
