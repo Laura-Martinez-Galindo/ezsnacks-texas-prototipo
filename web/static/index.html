@@ -26,6 +26,10 @@
     </div>
 
     <nav class="pasos">
+      <button class="paso" data-ir="archivos" aria-current="page"><span class="paso-n">1</span><span>Archivos</span></button>
+      <button class="paso" data-ir="productos" disabled><span class="paso-n">2</span><span>Qué no paga impuesto</span></button>
+      <button class="paso" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
+      <button class="paso" data-ir="comisiones" disabled><span class="paso-n">4</span><span>Comisiones</span></button>
       <button class="paso" data-rol="operador" data-ir="archivos" aria-current="page"><span class="paso-n">1</span><span>Archivos</span></button>
       <button class="paso" data-rol="operador" data-ir="productos" disabled><span class="paso-n">2</span><span>Qué no paga impuesto</span></button>
       <button class="paso" data-rol="operador" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
@@ -194,6 +198,19 @@
           <p class="nota-tabla" id="nota-comparar"></p>
         </div>
       </div>
+      <div class="siguiente"><button class="boton" data-ir="comisiones">Siguiente</button></div>
+    </section>
+
+    <!-- 4. Comisiones -->
+    <section class="vista" id="vista-comisiones" aria-labelledby="h-comisiones" hidden>
+      <h2 id="h-comisiones">Comisiones</h2>
+      <p class="guia">Se muestran todos los lugares. Califican para comisión los que generan una utilidad mensual de <strong>$300 o más</strong>.</p>
+      <div class="aviso">
+        <h3>Tasa de comisión pendiente</h3>
+        <p>La tasa se agregará cuando sea definida. Por ahora, esta vista identifica los lugares que califican.</p>
+      </div>
+      <p class="guia" id="comisiones-vacio" hidden>Suba los archivos en el paso 1 o pruebe con los archivos de ejemplo para ver las comisiones.</p>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-comisiones"></table></div>
     </section>
 
     <!-- Historial de cierres -->

@@ -7,6 +7,8 @@
     productos         la clasificacion que el gerente ya decidio para cada producto
     equivalencias     nombres distintos del mismo producto en los distintos sistemas de ventas
     formatos          los sistemas de ventas registrados y como se leen sus columnas
+    comisionistas     a quien se le paga comision (ProCity, NAU, VMS...) con su regla en las reglas versionadas
+    comision_asignaciones  que maquina comisiona a quien (una maquina, un comisionista)
     cierres           cada cierre guardado, con las reglas que tenia en ese momento
     cierre_maquinas   el detalle por maquina de cada cierre (un renglon = un recibo de venta)
     bitacora          quien cambio que y cuando
@@ -81,6 +83,21 @@ equivalencias_t = sa.Table("equivalencias", meta,
                            sa.Column("estado", sa.String(10), nullable=False),        # unido o distinto
                            sa.Column("por", sa.String(80)), sa.Column("fecha", sa.String(32)),
                            sa.UniqueConstraint("empresa_id", "alias", "producto"))
+comisionistas_t = sa.Table("comisionistas", meta,
+                           sa.Column("id", sa.Integer, primary_key=True),
+                           sa.Column("empresa_id", sa.Integer, sa.ForeignKey("empresas.id"), nullable=False),
+                           sa.Column("codigo", sa.String(24), nullable=False),        # "ProCity", "NAU", "VMS"...
+                           sa.Column("nombre", sa.String(120), nullable=False),       # nombre completo para mostrar
+                           sa.Column("activo", sa.Boolean, nullable=False, default=True),
+                           sa.Column("actualizado", sa.String(32)),
+                           sa.UniqueConstraint("empresa_id", "codigo"))
+comision_asignaciones_t = sa.Table("comision_asignaciones", meta,
+                                   sa.Column("id", sa.Integer, primary_key=True),
+                                   sa.Column("empresa_id", sa.Integer, sa.ForeignKey("empresas.id"), nullable=False),
+                                   sa.Column("id_maquina", sa.String(20), nullable=False),
+                                   sa.Column("codigo", sa.String(24), sa.ForeignKey("comisionistas.codigo"), nullable=False),
+                                   sa.Column("desde", sa.String(7), nullable=False),  # "2026-09": mes en el que empezo a comisionar
+                                   sa.UniqueConstraint("empresa_id", "id_maquina"))   # UN comisionista por maquina
 cierres_t = sa.Table("cierres", meta,
                      sa.Column("id", sa.Integer, primary_key=True),
                      sa.Column("empresa_id", sa.Integer, sa.ForeignKey("empresas.id"), nullable=False),
@@ -137,6 +154,7 @@ def completar(R: dict) -> dict:
     R.setdefault("cupones_empresa_cuentan", False)   # los cupones de empresas no son venta ni devolucion
     R.setdefault("agua_palabras", ["water", "agua"])
     R.setdefault("agua_excepciones", ["vitamin", "coconut", "tonic", "flavored", "kiwi", "strawberry", "lemonade", "juice", "bubly"])
+    R.setdefault("comisiones", {"activas": True, "costo_lector_por_maquina": 15.0, "comisionistas": {}})
     R.setdefault("contabilidad", {})
     R["contabilidad"] = {"destino": "quickbooks", "cuenta": "Ventas en maquinas", "cliente": "Consumidores en maquinas",
                          **R["contabilidad"]}
@@ -243,6 +261,25 @@ def validar_reglas(R: dict) -> dict:
     if len({j["nombre_comptroller"] for j in jur.values()}) != len(jur):
         raise ValueError("Dos jurisdicciones tienen el mismo nombre del Comptroller.")
     limpio["jurisdicciones"] = jur
+    com = R.get("comisiones") or {}
+    coma = {"activas": bool(com.get("activas", True)),
+            "costo_lector_por_maquina": max(float(com.get("costo_lector_por_maquina") or 0), 0.0),
+            "comisionistas": {}}
+    for codigo, c in (com.get("comisionistas") or {}).items():
+        codigo = str(codigo).strip()
+        if not codigo:
+            raise ValueError("Cada comisionista necesita un código.")
+        base_com = str(c.get("base", "ventas_netas"))
+        if base_com not in ("ventas_netas", "neto_con_costos"):
+            raise ValueError(f"La base de {codigo} debe ser ventas_netas o neto_con_costos.")
+        coma["comisionistas"][codigo] = {
+            "nombre": str(c.get("nombre") or codigo).strip()[:120],
+            "tasa_pct": pct(c.get("tasa_pct", 0), f"La tasa de {codigo}", 100),
+            "minimo_por_maquina": max(float(c.get("minimo_por_maquina") or 0), 0.0),
+            "base": base_com,
+            "pct_procesamiento_tarjeta": pct(c.get("pct_procesamiento_tarjeta", 0),
+                                             f"El procesamiento de tarjeta de {codigo}", 100)}
+    limpio["comisiones"] = coma
     conta = R.get("contabilidad") or {}
     destino = conta.get("destino") if conta.get("destino") in ("quickbooks", "excel") else "quickbooks"
     limpio["contabilidad"] = {"destino": destino,
@@ -426,6 +463,67 @@ def borrar_formato(nombre: str, usuario: str) -> None:
     with motor().begin() as c:
         c.execute(formatos_t.delete().where((formatos_t.c.empresa_id == EMPRESA) & (formatos_t.c.nombre == nombre)))
     anotar(usuario, "Quitó un sistema de ventas", nombre)
+
+
+# ---------------- comisiones ----------------
+def comisionistas() -> list[dict]:
+    with motor().connect() as c:
+        filas = c.execute(sa.select(comisionistas_t).where(comisionistas_t.c.empresa_id == EMPRESA)
+                          .order_by(comisionistas_t.c.codigo)).mappings().all()
+    return [{"codigo": f["codigo"], "nombre": f["nombre"], "activo": bool(f["activo"])} for f in filas]
+
+
+def guardar_comisionista(codigo: str, nombre: str, usuario: str, activo: bool = True) -> None:
+    codigo, nombre = str(codigo).strip()[:24], str(nombre).strip()[:120]
+    if not codigo or not nombre:
+        raise ValueError("El comisionista necesita código y nombre.")
+    with motor().begin() as c:
+        previo = c.execute(sa.select(comisionistas_t).where(
+            (comisionistas_t.c.empresa_id == EMPRESA) & (comisionistas_t.c.codigo == codigo))).mappings().first()
+        valores = {"nombre": nombre, "activo": bool(activo), "actualizado": _ahora()}
+        if previo is None:
+            c.execute(comisionistas_t.insert().values(empresa_id=EMPRESA, codigo=codigo, **valores))
+        else:
+            c.execute(comisionistas_t.update().where(comisionistas_t.c.id == previo["id"]).values(**valores))
+    anotar(usuario, "Guardó un comisionista", f"{codigo}: {nombre}")
+
+
+def asignaciones_comision(periodo: str) -> dict[str, str]:
+    """{"id_maquina": "codigo"} vigentes en un mes ("2026-09"). Una maquina, un comisionista."""
+    with motor().connect() as c:
+        filas = c.execute(sa.select(comision_asignaciones_t)
+                          .where((comision_asignaciones_t.c.empresa_id == EMPRESA)
+                                 & (comision_asignaciones_t.c.desde <= periodo))).mappings().all()
+    return {f["id_maquina"]: f["codigo"] for f in filas}
+
+
+def asignar_comision(id_maquina: str, codigo: str | None, usuario: str, desde: str) -> None:
+    """codigo=None quita la asignacion (desde ese mes). Sobrescribe la asignacion de la maquina."""
+    id_maquina = str(id_maquina).strip()[:20]
+    if not id_maquina:
+        raise ValueError("Falta la máquina.")
+    if not (len(desde) == 7 and desde[4] == "-" and desde[:4].isdigit() and desde[5:].isdigit() and 1 <= int(desde[5:]) <= 12):
+        raise ValueError("El mes desde el que comisiona debe ser como 2026-09.")
+    if codigo is not None:
+        codigo = str(codigo).strip()[:24]
+    with motor().begin() as c:
+        previa = c.execute(sa.select(comision_asignaciones_t).where(
+            (comision_asignaciones_t.c.empresa_id == EMPRESA)
+            & (comision_asignaciones_t.c.id_maquina == id_maquina))).mappings().first()
+        if codigo is None:
+            if previa is not None:
+                c.execute(comision_asignaciones_t.delete().where(comision_asignaciones_t.c.id == previa["id"]))
+        else:
+            existe = c.execute(sa.select(comisionistas_t.c.codigo).where(
+                (comisionistas_t.c.empresa_id == EMPRESA) & (comisionistas_t.c.codigo == codigo))).first()
+            if not existe:
+                raise ValueError("Ese comisionista no existe.")
+            valores = {"codigo": codigo, "desde": desde}
+            if previa is None:
+                c.execute(comision_asignaciones_t.insert().values(empresa_id=EMPRESA, id_maquina=id_maquina, **valores))
+            else:
+                c.execute(comision_asignaciones_t.update().where(comision_asignaciones_t.c.id == previa["id"]).values(**valores))
+    anotar(usuario, "Asignó una comisión", f"Máquina {id_maquina} → {codigo or 'sin comisión'} desde {desde}")
 
 
 # ---------------- usuarios ----------------

@@ -16,6 +16,15 @@ Las devoluciones se pueden calcular de dos maneras (regla "devoluciones"):
     porcentaje   Como el Excel del gerente: se resta un porcentaje fijo (3 %) de lo vendido en
                  efectivo y tarjeta, y los cupones no se tocan.
 
+Las comisiones se calculan sobre las ventas netas de cada maquina (la tabla pm), segun la
+asignacion maquina -> comisionista de la base de datos y la regla versionada de cada comisionista:
+
+    ventas_netas     ProCity (Charles): por maquina, si vende menos del minimo (300) no paga nada;
+                     si no, la tasa (10 %) sobre las ventas netas.
+    neto_con_costos  Locaciones como la universidad: se junta todo por locacion, el efectivo entra
+                     completo, la tarjeta pierde el porcentaje del procesador (5.95 %) y se resta
+                     el costo de cada lector (15 por maquina que vendio en el mes). Nunca negativa.
+
 Todo se calcula primero por maquina y al centavo, y los totales son la suma de las maquinas. Asi
 el resumen, el Excel y los recibos que se envian a QuickBooks salen de los mismos numeros y
 QuickBooks no puede dar una base distinta a la de la aplicacion.
@@ -115,6 +124,105 @@ def impuesto_esperado(maquinas: pd.DataFrame, R: dict) -> list[dict]:
     for f in filas.values():
         f["base"], f["impuesto"] = round(f["base"], 2), round(f["impuesto"], 2)
     return list(filas.values())
+
+
+def calcular_comisiones(pm: pd.DataFrame, R: dict, periodo: str) -> dict:
+    """Las comisiones del mes a partir de la tabla por maquina (pm) y las reglas versionadas.
+
+    Una maquina comisiona a un solo comisionista (la asignacion vive en la base de datos), para
+    que no haya comision doble sobre la misma venta. Devuelve el detalle por maquina y el resumen
+    por comisionista, listo para el panel y para guardarse en el historial del cierre.
+    """
+    vacio = {"activas": False, "detalle": [], "resumen": []}
+    com = R.get("comisiones") or {}
+    if not com.get("activas", True):
+        return vacio
+    reglas_c = {k: v for k, v in (com.get("comisionistas") or {}).items()
+                if v and float(v.get("tasa_pct") or 0) > 0}
+    if not reglas_c:
+        return vacio
+    asignaciones = {m: c for m, c in almacen.asignaciones_comision(periodo).items() if c in reglas_c}
+    if not asignaciones:
+        return {**vacio, "activas": True}
+    costo_lector = max(float(com.get("costo_lector_por_maquina") or 0), 0.0)
+
+    detalle: list[dict] = []
+    grupos: dict[str, dict[str, list]] = {}          # codigo -> {locacion: [filas de pm]}
+    sin_ventas: list[dict] = []
+    for idm, codigo in asignaciones.items():
+        fila = pm[pm["id_maquina"] == idm]
+        if not len(fila):
+            sin_ventas.append({"id_maquina": idm, "comisionista": codigo,
+                              "nota": "Tuvo comisión asignada pero no aparece en el cierre del mes."})
+            continue
+        grupo = grupos.setdefault(codigo, {})
+        locacion = str(fila["locacion"].iloc[0]) or "(sin locación)"
+        grupo.setdefault(locacion, []).append(fila.iloc[0])
+
+    resumen: dict[str, dict] = {}
+    for codigo, regla in reglas_c.items():
+        base_com = str(regla.get("base", "ventas_netas"))
+        tasa = float(regla["tasa_pct"]) / 100
+        minimo = max(float(regla.get("minimo_por_maquina") or 0), 0.0)
+        pct_tarjeta = float(regla.get("pct_procesamiento_tarjeta") or 0) / 100
+        filas_com = grupos.get(codigo)
+        resumen[codigo] = {"codigo": codigo, "nombre": regla.get("nombre") or codigo, "base": base_com,
+                           "tasa_pct": regla["tasa_pct"], "minimo_por_maquina": minimo,
+                           "pct_procesamiento_tarjeta": regla.get("pct_procesamiento_tarjeta", 0),
+                           "maquinas": 0, "ventas": 0.0, "costo_lectores": 0.0, "base_calculo": 0.0, "total": 0.0}
+        if not filas_com:
+            continue
+        rr = resumen[codigo]
+        if base_com == "ventas_netas":
+            # una maquina a la vez: sin datos de costo ni procesamiento, solo ventas netas
+            for locacion, maqs in filas_com.items():
+                for m in maqs:
+                    ventas = float(m["ventas"])
+                    rr["maquinas"] += 1
+                    rr["ventas"] += ventas
+                    if ventas < minimo:
+                        detalle.append({"codigo": codigo, "nombre": rr["nombre"], "id_maquina": m["id_maquina"],
+                                        "maquina": m["maquina"], "locacion": locacion, "base": base_com,
+                                        "ventas": _c(ventas), "minimo": minimo, "pasa_minimo": False,
+                                        "costo_lector": 0.0, "base_calculo": 0.0, "comision": 0.0})
+                        continue
+                    base = _c(ventas)
+                    comision = _c(ventas * tasa)
+                    rr["base_calculo"] += base
+                    rr["total"] += comision
+                    detalle.append({"codigo": codigo, "nombre": rr["nombre"], "id_maquina": m["id_maquina"],
+                                    "maquina": m["maquina"], "locacion": locacion, "base": base_com,
+                                    "ventas": base, "minimo": minimo, "pasa_minimo": True,
+                                    "costo_lector": 0.0, "base_calculo": base, "comision": comision})
+        else:
+            # por locacion: el efectivo entra completo, la tarjeta pierde el procesador y
+            # cada maquina con ventas en el mes suma el costo de su lector
+            for locacion, maqs in filas_com.items():
+                efectivo = sum(float(m["neto_e"]) for m in maqs)
+                tarjeta = sum(float(m["neto_t"]) for m in maqs)
+                ventas = efectivo + tarjeta
+                lectores = costo_lector * len(maqs)
+                base = max(_c(efectivo + tarjeta * (1 - pct_tarjeta) - lectores), 0.0)
+                comision = _c(base * tasa)
+                rr["maquinas"] += len(maqs)
+                rr["ventas"] += ventas
+                rr["costo_lectores"] += lectores
+                rr["base_calculo"] += base
+                rr["total"] += comision
+                detalle.append({"codigo": codigo, "nombre": rr["nombre"], "id_maquina": ", ".join(
+                                    str(m["id_maquina"]) for m in maqs),
+                                "maquina": f"{locacion} ({len(maqs)} máquina{'s' if len(maqs) > 1 else ''})",
+                                "locacion": locacion, "base": base_com,
+                                "ventas": _c(ventas), "efectivo": _c(efectivo), "tarjeta": _c(tarjeta),
+                                "minimo": 0, "pasa_minimo": True,
+                                "costo_lector": _c(lectores), "base_calculo": base, "comision": comision})
+        rr["ventas"] = _c(rr["ventas"])
+        rr["costo_lectores"] = _c(rr["costo_lectores"])
+        rr["base_calculo"] = _c(rr["base_calculo"])
+        rr["total"] = _c(rr["total"])
+
+    return {"activas": True, "periodo": periodo, "costo_lector_por_maquina": costo_lector,
+            "detalle": detalle, "resumen": list(resumen.values()), "sin_ventas": sin_ventas}
 
 
 def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
@@ -270,6 +378,10 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         marcado=lambda x: x["producto"].isin(exentos))
     cruce = cruce.assign(marcado=cruce["producto"].isin(pagados), exento=cruce["producto"].isin(exentos))
 
+    comisiones = calcular_comisiones(pm, R, f"{anio}-{mes:02d}")
+    for s in comisiones.get("sin_ventas", []):
+        pass   # ya traen su propia nota
+
     revisar = []
     for _, m in pm[~pm["en_lista"]].iterrows():
         revisar.append({"texto": m["maquina"], "detalle": "No está en la lista de máquinas: no cuenta para Houston ni MTA."})
@@ -281,6 +393,9 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         revisar.append({"texto": f["producto"], "detalle": f"Puede ser “{f['buscado']}”, pero el nombre no dice el tamaño."})
     for _, f in cruce[cruce["estado"] == "sin_ventas"].iterrows():
         revisar.append({"texto": f["buscado"], "detalle": "Está en la lista de compras, pero no tuvo ventas este mes."})
+    for s in comisiones.get("sin_ventas", []):
+        revisar.append({"texto": f"Máquina {s['id_maquina']}", "detalle": s["nota"]})
 
     return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "cupones": cupones, "exentos": lista_exentos, "pagados": cruce,
+            "comisiones": comisiones,
             "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}
