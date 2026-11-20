@@ -204,13 +204,14 @@
     <!-- 4. Comisiones -->
     <section class="vista" id="vista-comisiones" aria-labelledby="h-comisiones" hidden>
       <h2 id="h-comisiones">Comisiones</h2>
-      <p class="guia">Se muestran todos los lugares. Califican para comisión los que generan una utilidad mensual de <strong>$300 o más</strong>.</p>
-      <div class="aviso">
-        <h3>Tasa de comisión pendiente</h3>
-        <p>La tasa se agregará cuando sea definida. Por ahora, esta vista identifica los lugares que califican.</p>
-      </div>
+      <p class="guia">Cada máquina comisiona a un solo comisionista, según la asignación de la Configuración y las reglas del mes. El prospector cobra solo si la máquina pasa el mínimo; las locaciones cobran sobre el neto: el efectivo completo, la tarjeta menos el costo del procesador y el costo de cada lector.</p>
       <p class="guia" id="comisiones-vacio" hidden>Suba los archivos en el paso 1 o pruebe con los archivos de ejemplo para ver las comisiones.</p>
-      <div class="tabla-envoltura"><table class="tabla" id="tabla-comisiones"></table></div>
+      <div id="res-comisiones">
+        <h3>Resumen por comisionista</h3>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-comisiones-resumen"></table></div>
+        <h3>Detalle</h3>
+        <div class="tabla-envoltura tabla-alta"><table class="tabla" id="tabla-comisiones"></table></div>
+      </div>
     </section>
 
     <!-- Historial de cierres -->
@@ -232,7 +233,7 @@
       <div class="aviso" id="aviso-almacen" hidden><p></p></div>
       <nav class="secciones" aria-label="Secciones de la configuración">
         <a href="#sec-impuestos">Impuestos</a><a href="#sec-devoluciones">Devoluciones</a><a href="#sec-contabilidad">Contabilidad</a>
-        <a href="#sec-productos">Productos</a><a href="#sec-maquinas">Máquinas</a><a href="#sec-sistemas">Sistemas de ventas</a>
+        <a href="#sec-productos">Productos</a><a href="#sec-maquinas">Máquinas</a><a href="#sec-comisiones">Comisiones</a><a href="#sec-sistemas">Sistemas de ventas</a>
         <a href="#sec-usuarios" data-rol="admin">Usuarios</a><a href="#sec-cambios">Cambios</a>
       </nav>
 
@@ -305,6 +306,23 @@
           </label>
         </div>
 
+        <h3 id="sec-comisiones-r">Comisiones</h3>
+        <p class="guia">El costo de cada lector se resta de la base de las locaciones que cobran sobre el neto, y el porcentaje de procesamiento solo descuenta la parte pagada con tarjeta. Cada comisionista se define con su código, su tasa y su mínimo; los cambios se guardan como una versión nueva de las reglas, con el mes desde el que aplican.</p>
+        <div class="fila-campos">
+          <label>Comisiones activas
+            <select id="cfg-comisiones-activas">
+              <option value="si">Activas</option>
+              <option value="no">Desactivadas</option>
+            </select>
+          </label>
+          <label>Costo del lector por máquina
+            <span class="campo-unidad"><span>$</span><input type="number" id="cfg-costo-lector" min="0" step="0.5" value="15"></span>
+            <small>Lo que la empresa paga por cada lector instalado.</small>
+          </label>
+        </div>
+        <div class="tabla-envoltura"><table class="tabla tabla-edicion" id="tabla-comisionistas"></table></div>
+        <div><button class="boton boton-secundario" type="button" id="btn-comisionista-nuevo" data-rol="admin">Agregar comisionista</button></div>
+
         <div class="guardar-reglas" data-rol="admin">
           <label>Aplican desde
             <input type="month" id="cfg-desde" required>
@@ -339,6 +357,14 @@
         <input type="file" id="archivo-maquinas" accept=".xlsx,.xls,.csv" class="oculto">
       </div>
       <div class="tabla-envoltura tabla-alta"><table class="tabla tabla-edicion" id="tabla-cfg-maquinas"></table></div>
+
+      <h3 id="sec-comisiones">Asignación de comisiones</h3>
+      <p class="guia">Cada máquina comisiona a un solo comisionista desde el mes que se indique. Sin asignación, la máquina no genera comisión. Las asignaciones son inmediatas (no se guardan con las reglas) y quedan en la bitácora.</p>
+      <div class="agregar">
+        <label for="buscar-cfg-comision" class="oculto">Buscar máquina</label>
+        <input id="buscar-cfg-comision" type="search" placeholder="Buscar máquina, locación o comisionista">
+      </div>
+      <div class="tabla-envoltura tabla-alta"><table class="tabla tabla-edicion" id="tabla-asignaciones"></table></div>
 
       <h3 id="sec-sistemas">Sistemas de ventas registrados</h3>
       <p class="guia">Nayax, AV360, XMAI y Qingo ya vienen. Cuando llega el reporte de otro sistema, en el paso 1 se le dice una sola vez cuál columna es cada dato y se guarda con un nombre. Desde ahí se reconoce solo.</p>
