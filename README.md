@@ -73,17 +73,74 @@ En QuickBooks, en Sales Tax, hubo que completar las agencias: venían Arizona y 
 
 Las tasas y las reglas de impuestos las mantiene Intuit dentro de QuickBooks, así que no hay tablas de impuestos que actualizar en el código.
 
-En la sección Reglas de la página se cambian las ciudades de cada jurisdicción y el monto desde el cual un mes de cupones se toma como venta a una empresa. Los cambios quedan guardados en el navegador.
+En Configuración se cambia todo lo que depende del negocio, sin tocar el código, y queda guardado en la base de datos de la empresa con quién lo cambió y desde qué mes aplica. La sección Configuración y datos lo detalla.
 
 Si llega un reporte de otro sistema, o un lector cambia el formato del suyo, la página reconoce las columnas por su nombre, en español o en inglés, y propone cuál es la máquina, el producto, la cantidad y el valor vendido. Si no acierta, la persona elige la columna de cada campo en una lista y vuelve a calcular.
 
-## Verificación con septiembre de 2026
+## Que QuickBooks dé lo mismo que la aplicación
 
-Con los archivos reales de septiembre, el programa cuadra al centavo con el total que cada lector trae en su propio reporte, y QuickBooks reporta las mismas ventas gravables que calcula la aplicación.
+Todo se calcula primero por máquina y al centavo: lo vendido, las devoluciones, el agua, lo comprado con impuesto pagado y la venta gravable. El resumen de la página, la hoja Machines del Excel y los recibos de QuickBooks son esa misma tabla, así que no pueden dar bases distintas. La base de HOUSTON-CITY y la de HOUSTON MTA son las ventas gravables de las máquinas de esas ciudades, que es sobre lo que QuickBooks cobra el 1 %.
 
-Queda una diferencia contra lo que declaró la empresa, 3,970.79 dólares. Viene de dos cosas. La primera es el agua y los productos comprados por fuera, que el gerente filtró a mano y no coinciden con lo que sale de los datos. La segunda son las devoluciones: él descontó un 3 % estimado, unos 1,883 dólares, mientras que los cupones devueltos a clientes en septiembre fueron 90. Las dos hay que confirmarlas con él.
+Al conectar QuickBooks, la aplicación deja la empresa configurada sin que nadie entre a Sales Tax: crea la agencia, las tres tasas propias, los tres productos con su marca de gravable o no, el cliente y la cuenta de ingresos. Si en las reglas cambia un porcentaje, crea un código de impuesto nuevo, porque QuickBooks no deja editar una tasa por la API.
 
-Los archivos reales de la empresa no se publican en este repositorio. La carpeta datos_prueba tiene archivos con el mismo formato, pero con máquinas y ventas inventadas, y se generan con scripts/generar_datos_prueba.py.
+Después de enviar el mes, la página muestra tasa por tasa la base y el impuesto de la aplicación al lado de los que devolvió QuickBooks, y marca si son iguales. QuickBooks redondea el impuesto recibo por recibo; el Comptroller redondea las bases a dólares enteros. Por eso el valor del Comptroller puede diferir en centavos, y la página muestra los dos.
+
+## Las reglas dentro de QuickBooks
+
+Las reglas no quedan solo en la aplicación: se migran a cualquier QuickBooks que se conecte, en el momento de conectarlo y sin esperar al primer envío. La aplicación crea en esa empresa un tax code por jurisdicción con la tasa del estado y la local, y un item por cada producto del catálogo con su marca de gravable; el agua queda como no gravable en QuickBooks mismo. También crea los items de devoluciones y de cupones vendidos a empresas, el cliente y la cuenta de ingresos. No toca transacciones existentes y, si se conecta otra vez, no duplica nada. Cuando se guardan reglas nuevas en Configuración, se vuelven a migrar.
+
+Cada recibo trae un renglón por producto; los comprados con impuesto ya pagado van ese mes con el código NON, las devoluciones (los cupones de reembolso del mes) son un renglón negativo y los cupones que compran las empresas un renglón gravable. Así QuickBooks decide con sus propios items y códigos qué es gravable y cuánto impuesto cobra, y si alguien registra una venta a mano en QuickBooks, el agua ya sale sin impuesto.
+
+## Lo que la aplicación puede tocar en QuickBooks
+
+Nada de lo que la empresa ya tenía se modifica. La aplicación solo crea lo suyo: la agencia de impuestos si no existe, sus códigos de impuesto, sus items (marcados "EzSnack Impuestos" en la descripción), el cliente, la cuenta de ingresos y un recibo de venta por máquina y mes. Después solo actualiza lo que ella misma creó. No toca facturas, pagos, bancos, nómina, proveedores ni gastos, no reactiva registros inactivos y nunca borra.
+
+Eso no depende solo de que el código esté bien escrito: el cliente de QuickBooks (ezsnack/qbo.py) tiene un candado que revisa cada escritura antes de enviarla y bloquea cualquier cosa fuera de esa lista, o cualquier cambio a un registro que la aplicación no creó. El candado solo se abre para limpiar la empresa de prueba.
+
+Antes de crear un item, la aplicación busca si la empresa ya lo tiene, sea de inventario, de servicio o no inventariable: por el nombre, por los otros nombres con que lo traen los sistemas y por un nombre que sea el mismo producto escrito distinto. Si lo encuentra, lo usa tal como está, sin cambiarle la marca de gravable. Como cada renglón del recibo dice si paga impuesto, el agua sale sin impuesto en los recibos de la aplicación aunque el item de la empresa diga otra cosa. Al terminar dice cuáles productos ya existían con otra marca y no se tocaron.
+
+Si la empresa ya tiene un recibo con el mismo número que usaría la aplicación, ese recibo no se toca y se avisa.
+
+Para no contar dos veces el mismo ingreso, los recibos de la aplicación quedan en la cuenta Fondos no depositados (Undeposited Funds). Cuando llega al banco el depósito de Nayax o de otro lector, se empareja con esos recibos en lugar de registrarlo otra vez como ingreso. Además, antes de enviar, la aplicación lee el estado de resultados del mes en QuickBooks: si ya hay ingresos en otras cuentas, muestra cuáles y cuánto, y no envía nada hasta que alguien confirme que son otros ingresos de la empresa. Igual conviene que el contador revise cómo se registran hoy los depósitos de los lectores.
+
+## El mismo producto con nombres distintos
+
+Cada sistema de ventas escribe los productos a su manera: "12oz - Coke Classic Can" en Nayax y "Coke Classic - 12 oz. can" en otro. En Configuración, Productos, la aplicación propone los pares que parecen el mismo producto: las palabras que distinguen un producto, como Zero o Diet, tienen que estar en los dos nombres, y el tamaño tiene que ser el mismo. La persona une o descarta cada par. Los nombres unidos cuentan como un solo producto en el catálogo, en el Excel y en QuickBooks, y lo que se marque con cualquiera de los dos nombres vale para el producto. Unir nombres no cambia el impuesto.
+
+## Devoluciones a clientes
+
+Es una regla que se cambia en Configuración. Con cupones se restan los cupones de reembolso que trae el reporte y se suman como venta los que compran las empresas para sus empleados. Con porcentaje fijo se resta un porcentaje de lo vendido en efectivo y tarjeta, como en el Excel hecho a mano, que usa el 3 %. Las devoluciones que se hacen desde Nayax llegan en negativo en su reporte y siempre restan. Por defecto las devoluciones son los cupones de reembolso del mes, y agua es todo producto cuyo nombre diga water, también el endulzado, como lo filtra el gerente. Las dos cosas se cambian en Configuración.
+
+## Comparar con el Excel hecho a mano
+
+Es una herramienta del equipo y no aparece en la página normal: se abre agregando ?interno=1 al final de la dirección. En el paso 3 se sube el Excel integrado que el gerente armó para el mismo mes. La aplicación lee su tabla y su resumen, compara renglón por renglón y busca la causa de cada diferencia en los datos: una máquina que está en el reporte del lector y no en el Excel, un porcentaje fijo en lugar de los cupones, una cifra digitada que no sale de la tabla del mismo archivo, o una máquina que se quedó por fuera al filtrar a mano las de Houston. Sirve para correr un mes en paralelo antes de dejar el proceso manual.
+
+## Registrar otro sistema de ventas
+
+Nayax, AV360, XMAI y Qingo vienen reconocidos. Cuando llega el reporte de otro sistema, la página propone cuál columna es la máquina, el producto, la cantidad y el valor. La persona corrige lo que haga falta, le pone un nombre al sistema y lo registra. Desde ese momento sus reportes se reconocen solos y aparecen con ese nombre. Los sistemas registrados se ven y se quitan en Configuración, y quedan guardados en la base de datos de la empresa.
+
+## Configuración y datos
+
+Lo que cambia con el negocio se maneja desde la página, en Configuración, y queda en la base de datos:
+
+| Sección | Qué se configura |
+|---|---|
+| Impuestos y jurisdicciones | La tasa del estado, el descuento por pagar a tiempo y una tabla de jurisdicciones locales: nombre, código del Comptroller, tasa y ciudades. Una ciudad nueva con impuesto local es una fila más |
+| Devoluciones, cupones y agua | El método de devoluciones, las máquinas donde una empresa compra cupones y las palabras que marcan un producto como agua |
+| Contabilidad | A dónde se envían las ventas (QuickBooks o solo Excel) y los nombres de la cuenta y del cliente |
+| Productos | La clasificación que ya se decidió para cada producto. Lo que se marca en el paso 2 queda guardado y se propone solo el mes siguiente |
+| Máquinas | El vendor list guardado y editable. No hay que subirlo cada mes |
+| Sistemas de ventas | Los formatos de reporte registrados |
+| Usuarios | Quién entra y con qué rol |
+| Cambios | Quién cambió qué y cuándo |
+
+Las reglas se guardan por versiones. Cada versión dice desde qué mes aplica, así que un cambio de tasa en noviembre no altera el cierre de septiembre. Cuando cambia una tasa o aparece una jurisdicción, la aplicación crea el código de impuesto correspondiente en QuickBooks.
+
+Hay tres roles. Consulta ve el historial y la configuración. Operador hace el cierre, clasifica productos, edita máquinas y envía a contabilidad. Administrador además cambia las reglas, conecta QuickBooks y maneja los usuarios. Mientras no exista ningún usuario la página está abierta; al crear el primer administrador empieza a pedir usuario y clave. Las claves se guardan cifradas con PBKDF2.
+
+Cada cierre se puede guardar en el Historial, con las reglas que tenía y el detalle por máquina, y se guarda solo al enviarlo a contabilidad. Un cierre marcado como declarado no se reemplaza sin reabrirlo.
+
+El modelo de datos está en ezsnack/almacen.py: empresas, usuarios, reglas, maquinas, productos, formatos, cierres, cierre_maquinas y bitacora. Con la variable DATABASE_URL usa PostgreSQL. Sin ella usa un archivo SQLite en la carpeta datos, que sirve en un computador pero en Render se pierde cuando el servicio se reinicia. Los archivos de ventas que se suben cada mes no se guardan: solo el resultado del cierre.
 
 ## Publicarla en internet
 

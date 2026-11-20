@@ -353,3 +353,68 @@ button, input, select { font: inherit; color: inherit; }
   .mapeo-campos { grid-template-columns: 1fr 1fr; }
   #tabla-tecnica td:first-child, #tabla-modulos td:first-child { width: auto; white-space: normal; }
 }
+
+/* registrar un sistema nuevo, reglas de devoluciones */
+.mapeo-guardar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; margin-top: 12px; }
+.mapeo-guardar label { display: grid; gap: 6px; font-size: .9rem; color: var(--tenue); flex: 1 1 220px; max-width: 320px; }
+.mapeo-guardar input, .config select {
+  font: inherit; color: var(--tinta); background: var(--papel); border: 1px solid var(--linea);
+  border-radius: var(--radio-control); padding: 8px 10px; min-height: 40px; width: 100%;
+}
+#tabla-comparar td:first-child .sub, #tabla-qbo .sub { max-width: 62ch; white-space: normal; }
+
+/* ---------- configuracion, historial, usuarios ---------- */
+body[data-rol="consulta"] [data-rol="operador"],
+body:not([data-rol="admin"]) [data-rol="admin"] { display: none !important; }
+#sesion + #conexion { margin-top: 10px; }
+.secciones { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 6px; }
+.secciones a {
+  font-size: .88rem; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--linea);
+  background: var(--papel); color: var(--marino); text-decoration: none; min-height: 36px; display: inline-flex; align-items: center;
+}
+.secciones a:hover, .secciones a:focus-visible { border-color: var(--marino); }
+.config.config-ancha { max-width: none; margin-top: 0; }
+#vista-reglas h3 { margin-top: 2.4rem; scroll-margin-top: 16px; }
+.fila-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 18px; align-items: start; }
+.fila-campos label, .guardar-reglas label, .entrada-caja label { display: grid; gap: 6px; font-size: .9rem; color: var(--tenue); }
+.fila-campos input[type="text"], .fila-campos input[type="password"], .guardar-reglas input, .entrada-caja input,
+.tabla-edicion input[type="text"], .tabla-edicion input[type="number"], .tabla-edicion select {
+  font: inherit; color: var(--tinta); background: var(--papel); border: 1px solid var(--linea);
+  border-radius: var(--radio-control); padding: 8px 10px; min-height: 40px; width: 100%; min-width: 0;
+}
+.tabla-edicion td { vertical-align: middle; }
+.tabla-edicion input[type="number"] { max-width: 96px; text-align: right; }
+.tabla-edicion input[type="text"] { min-width: 120px; }
+.tabla-edicion input:disabled, .tabla-edicion select:disabled, .config input:disabled, .config select:disabled { background: var(--niebla); color: var(--tenue); }
+.guardar-reglas {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-top: 8px; padding: 16px;
+  border: 1px solid var(--linea); border-radius: var(--radio-panel); background: var(--papel);
+}
+.guardar-reglas .crece { flex: 1 1 260px; }
+.fila-usuario { margin: 16px 0; align-items: end; }
+.botones { display: flex; gap: 10px; flex-wrap: wrap; }
+.entrada {
+  position: fixed; inset: 0; z-index: 50; background: rgba(15, 61, 94, .92);
+  display: grid; place-items: center; padding: 20px;
+}
+.entrada-caja {
+  width: min(380px, 100%); background: var(--papel); border-radius: var(--radio-panel); padding: 28px;
+  display: grid; gap: 14px; color: var(--tinta);
+}
+.entrada-caja .marca-nombre { color: var(--marino); }
+.entrada-caja h2 { margin: 0 0 4px; }
+#aviso-almacen p { margin: 0; }
+.agregar label.boton { width: auto; color: #fff; font-size: inherit; }
+.fila-campos select { font: inherit; color: var(--tinta); background: var(--papel); border: 1px solid var(--linea);
+  border-radius: var(--radio-control); padding: 8px 10px; min-height: 40px; width: 100%; }
+#tabla-jur input[type="text"] { min-width: 92px; }
+#tabla-jur [data-j="ciudades"] { min-width: 170px; }
+#tabla-jur [data-j="codigo"] { max-width: 110px; }
+#tabla-jur th, #tabla-jur td { padding-left: 8px; padding-right: 8px; }
+#tabla-cierres td:last-child { white-space: nowrap; }
+#tabla-cierres td:last-child .enlace { display: block; margin: 2px 0; }
+.config > *, .fila-campos > *, .guardar-reglas > * { min-width: 0; }
+.guardar-reglas label { flex: 1 1 150px; }
+.guardar-reglas input { max-width: 100%; }
+.agregar .oculto { width: 1px; max-width: 1px; flex: none; padding: 0; border: 0; min-height: 0; }
+#vista-reglas h4 { margin: 1.8rem 0 .4rem; font-size: 1rem; color: var(--marino); }

@@ -87,8 +87,24 @@ def desconectar() -> None:
         TOKENS_FILE.unlink()
 
 
+class Bloqueado(QBOError):
+    """La aplicacion intento cambiar algo de la empresa que no le corresponde."""
+
+
+# Lo unico que la aplicacion puede crear en QuickBooks
+PUEDE_CREAR = {"TaxAgency", "Item", "Customer", "Account", "SalesReceipt"}
+# Lo unico que puede modificar, y solo si lo creo ella (ver QBO.propios)
+PUEDE_MODIFICAR = {"Item", "SalesReceipt"}
+
+
 class QBO:
-    """Cliente mínimo de la API de contabilidad de QuickBooks Online."""
+    """Cliente mínimo de la API de contabilidad de QuickBooks Online.
+
+    Tiene un candado: solo deja crear impuestos, productos, el cliente, la cuenta de ingresos y
+    recibos de venta; solo deja modificar productos y recibos que la propia aplicacion creo; nunca
+    deja borrar ni cambiar los datos de la empresa. El candado se abre solo en la empresa de prueba,
+    para limpiarla (ver sandbox.py).
+    """
 
     def __init__(self, tokens: dict | None = None) -> None:
         """Con tokens: los usa y los deja actualizados en self.tokens (la web los guarda en la sesion).
@@ -100,6 +116,8 @@ class QBO:
             tokens = json.loads(TOKENS_FILE.read_text())
         self.tokens = dict(tokens)
         self.renovado = False
+        self.propios: dict[str, set[str]] = {e: set() for e in PUEDE_MODIFICAR}
+        self.sin_candado = False
         env = os.getenv("QBO_ENVIRONMENT", "sandbox")
         self.base = f"{BASE_URLS[env]}/v3/company/{self.tokens['realm_id']}"
 
@@ -115,8 +133,40 @@ class QBO:
         if self.en_archivo:
             TOKENS_FILE.write_text(json.dumps(self.tokens, indent=2))
 
+    # ---------- candado ----------
+    def marcar_propio(self, entidad: str, id_) -> None:
+        """Registra un registro que creo la aplicacion: solo esos se pueden modificar."""
+        if entidad in self.propios and id_:
+            self.propios[entidad].add(str(id_))
+
+    def revisar(self, metodo: str, ruta: str, params: dict | None, json_body: dict | None) -> None:
+        """Lanza Bloqueado si la peticion cambiaria algo que la aplicacion no debe tocar."""
+        if metodo == "GET" or self.sin_candado:
+            return
+        ruta = ruta.lower().strip("/")
+        if ruta == "taxservice/taxcode":      # crea un codigo de impuesto nuevo; nunca edita uno existente
+            return
+        if ruta == "batch":
+            pedidos = [(p.get("operation", "create"), e, p[e]) for p in (json_body or {}).get("BatchItemRequest", [])
+                       for e in p if e not in ("bId", "operation", "optionsData")]
+        else:
+            entidad = next((e for e in PUEDE_CREAR | {"CompanyInfo", "Vendor", "Invoice", "Payment", "Bill", "Purchase",
+                                                       "JournalEntry", "Deposit", "Employee", "TaxCode", "TaxRate"}
+                            if e.lower() == ruta), ruta)
+            operacion = (params or {}).get("operation") or ("update" if (json_body or {}).get("Id") else "create")
+            pedidos = [(operacion, entidad, json_body or {})]
+        for operacion, entidad, cuerpo in pedidos:
+            if operacion == "create" and entidad in PUEDE_CREAR:
+                continue
+            if operacion == "update" and entidad in PUEDE_MODIFICAR and str(cuerpo.get("Id")) in self.propios[entidad]:
+                continue
+            que = {"create": "crear", "update": "modificar", "delete": "borrar"}.get(operacion, operacion)
+            raise Bloqueado(f"Bloqueado: la aplicación no puede {que} {entidad} {cuerpo.get('Id', '')} en QuickBooks. "
+                            "Solo crea lo suyo y modifica lo que ella misma creó.".replace("  ", " "))
+
     # ---------- peticiones ----------
     def _peticion(self, metodo: str, ruta: str, *, params=None, json_body=None, reintento=True):
+        self.revisar(metodo, ruta, params, json_body)
         self._renovar_si_hace_falta()
         params = {"minorversion": MINOR_VERSION, **(params or {})}
         resp = requests.request(

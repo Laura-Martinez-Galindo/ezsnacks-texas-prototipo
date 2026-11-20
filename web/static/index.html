@@ -30,12 +30,20 @@
       <button class="paso" data-ir="productos" disabled><span class="paso-n">2</span><span>Qué no paga impuesto</span></button>
       <button class="paso" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
       <button class="paso" data-ir="comisiones" disabled><span class="paso-n">4</span><span>Comisiones</span></button>
+      <button class="paso" data-rol="operador" data-ir="archivos" aria-current="page"><span class="paso-n">1</span><span>Archivos</span></button>
+      <button class="paso" data-rol="operador" data-ir="productos" disabled><span class="paso-n">2</span><span>Qué no paga impuesto</span></button>
+      <button class="paso" data-rol="operador" data-ir="declaracion" disabled><span class="paso-n">3</span><span>Declaración</span></button>
+      <button class="paso paso-ajuste" data-ir="historial"><span class="paso-n" aria-hidden="true">H</span><span>Historial</span></button>
       <button class="paso paso-ajuste" data-ir="reglas"><span class="paso-n" aria-hidden="true">
         <svg viewBox="0 0 20 20" width="14" height="14"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm7.4 4.6-1.6.9a6 6 0 0 1-.5 1.2l.5 1.8-1.7 1.7-1.8-.5c-.4.2-.8.4-1.2.5l-.9 1.6h-2.4l-.9-1.6a6 6 0 0 1-1.2-.5l-1.8.5-1.7-1.7.5-1.8a6 6 0 0 1-.5-1.2L2.6 11V8.9l1.6-.9c.1-.4.3-.8.5-1.2l-.5-1.8 1.7-1.7 1.8.5c.4-.2.8-.4 1.2-.5L9.8 1.7h2.4l.9 1.6c.4.1.8.3 1.2.5l1.8-.5 1.7 1.7-.5 1.8c.2.4.4.8.5 1.2l1.6.9z" fill="currentColor"/></svg>
-      </span><span>Reglas</span></button>
+      </span><span>Configuración</span></button>
       <button class="paso paso-ajuste" data-ir="como"><span class="paso-n" aria-hidden="true">?</span><span>Cómo funciona</span></button>
     </nav>
 
+    <div class="conexion" id="sesion" hidden>
+      <p class="conexion-estado" id="sesion-estado"></p>
+      <button class="enlace" id="btn-cerrar-sesion" hidden>Cerrar sesión</button>
+    </div>
     <div class="conexion" id="conexion" hidden>
       <p class="conexion-estado" id="conexion-estado">Revisando conexión…</p>
       <a class="boton boton-claro" id="btn-conectar" href="/auth/conectar" hidden>Conectar QuickBooks</a>
@@ -62,9 +70,9 @@
       <h2 id="h-archivos">Archivos</h2>
       <form id="form-archivos" class="carga">
         <label class="ranura">
-          <input type="file" name="maquinas" accept=".xlsx,.xls,.csv" required>
+          <input type="file" name="maquinas" accept=".xlsx,.xls,.csv">
           <span class="ranura-titulo">Lista de máquinas</span>
-          <span class="ranura-ayuda">Vendor list</span>
+          <span class="ranura-ayuda" id="ayuda-maquinas">Vendor list</span>
           <span class="ranura-archivo"></span>
         </label>
         <label class="ranura">
@@ -143,7 +151,10 @@
       <div class="tabla-envoltura"><table class="tabla" id="tabla-cascada"></table></div>
       <div class="envio">
         <p class="guia">Con la estructura del archivo que arma la empresa y las fórmulas a la vista.</p>
-        <button class="boton" id="btn-libro">Descargar Excel</button>
+        <div class="botones">
+          <button class="boton boton-secundario" id="btn-guardar-cierre">Guardar en el historial</button>
+          <button class="boton" id="btn-libro">Descargar Excel</button>
+        </div>
       </div>
 
       <h3>Valores para el Texas Comptroller</h3>
@@ -154,9 +165,18 @@
         <h3>QuickBooks</h3>
         <div class="envio">
           <div>
-            <p class="guia" id="guia-qbo">Crea un recibo de venta por máquina con su dirección y la tasa que le corresponde, y QuickBooks calcula el impuesto.</p>
+            <p class="guia" id="guia-qbo">Crea un recibo de venta por máquina con la tasa que le corresponde. QuickBooks calcula el impuesto y aquí se comprueba que dé lo mismo.</p>
           </div>
           <button class="boton boton-secundario" id="btn-qbo">Enviar a QuickBooks</button>
+        </div>
+        <div class="aviso aviso-alerta" id="aviso-ingresos" hidden>
+          <p><strong>Cuidado: este mes ya tiene ingresos en QuickBooks.</strong> <span id="texto-ingresos"></span></p>
+          <div class="tabla-envoltura"><table class="tabla" id="tabla-ingresos"></table></div>
+          <p>Si esos ingresos son las mismas ventas de las máquinas (por ejemplo, depósitos de Nayax registrados como ingreso), enviar los recibos las contaría dos veces. Los recibos de la aplicación quedan en Fondos no depositados: lo correcto es emparejar esos depósitos con los recibos en vez de registrarlos como ingreso. Si son otros ingresos de la empresa, puede enviar sin problema.</p>
+          <div class="botones">
+            <button class="boton" id="btn-qbo-confirmar">Son otros ingresos: enviar</button>
+            <button class="boton boton-secundario" id="btn-qbo-cancelar">No enviar</button>
+          </div>
         </div>
         <div class="progreso" id="prog-qbo" hidden><span></span></div>
         <div id="res-qbo" hidden>
@@ -165,9 +185,18 @@
         </div>
       </div>
 
-      <div id="verificacion" hidden>
-        <h3>Comparación con el Excel del gerente</h3>
-        <div class="tabla-envoltura"><table class="tabla" id="tabla-verif"></table></div>
+      <!-- Herramienta interna del equipo: solo aparece si la direccion termina en ?interno=1 -->
+      <div id="bloque-comparar" hidden>
+        <h3>Comparar con el Excel hecho a mano</h3>
+        <div class="envio">
+          <p class="guia" id="guia-comparar">Suba el Excel integrado que armó a mano para el mismo mes. La aplicación lo compara renglón por renglón y busca en los datos la causa de cada diferencia.</p>
+          <label class="boton boton-secundario" for="archivo-original" id="btn-comparar">Elegir Excel</label>
+          <input type="file" id="archivo-original" accept=".xlsx,.xls" class="oculto">
+        </div>
+        <div id="res-comparar" hidden>
+          <div class="tabla-envoltura"><table class="tabla" id="tabla-comparar"></table></div>
+          <p class="nota-tabla" id="nota-comparar"></p>
+        </div>
       </div>
       <div class="siguiente"><button class="boton" data-ir="comisiones">Siguiente</button></div>
     </section>
@@ -184,27 +213,153 @@
       <div class="tabla-envoltura"><table class="tabla" id="tabla-comisiones"></table></div>
     </section>
 
-    <!-- Reglas -->
+    <!-- Historial de cierres -->
+    <section class="vista" id="vista-historial" aria-labelledby="h-historial" hidden>
+      <h2 id="h-historial">Historial de cierres</h2>
+      <p class="guia">Cada cierre queda guardado con las reglas que tenía ese mes. Un cierre marcado como declarado no se puede reemplazar sin reabrirlo.</p>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-cierres"></table></div>
+      <div id="detalle-cierre" hidden>
+        <h3 id="titulo-detalle"></h3>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-detalle"></table></div>
+        <p class="nota-tabla" id="nota-detalle"></p>
+        <div class="tabla-envoltura tabla-alta"><table class="tabla" id="tabla-detalle-maquinas"></table></div>
+      </div>
+    </section>
+
+    <!-- Configuracion -->
     <section class="vista" id="vista-reglas" aria-labelledby="h-reglas" hidden>
-      <h2 id="h-reglas">Reglas</h2>
-      <form id="form-config" class="config">
-        <label>Ciudades de HOUSTON-CITY, 1 %
-          <input type="text" id="cfg-houston">
-        </label>
-        <label>Ciudades de HOUSTON MTA, 1 %
-          <input type="text" id="cfg-mta">
-          <small>Separadas por coma. Las demás ciudades solo pagan el 6.25 % del estado.</small>
-        </label>
-        <label>Un mes de cupones es venta a una empresa desde
-          <span class="campo-unidad"><span>$</span><input type="number" id="cfg-cupones" min="0" step="1"></span>
-          <small>Por debajo de ese monto se toman como devoluciones a clientes.</small>
-        </label>
-        <div class="carga-acciones">
-          <button class="boton" type="submit">Guardar</button>
-          <button class="enlace" type="button" id="btn-cfg-reset">Volver a las originales</button>
+      <h2 id="h-reglas">Configuración</h2>
+      <div class="aviso" id="aviso-almacen" hidden><p></p></div>
+      <nav class="secciones" aria-label="Secciones de la configuración">
+        <a href="#sec-impuestos">Impuestos</a><a href="#sec-devoluciones">Devoluciones</a><a href="#sec-contabilidad">Contabilidad</a>
+        <a href="#sec-productos">Productos</a><a href="#sec-maquinas">Máquinas</a><a href="#sec-sistemas">Sistemas de ventas</a>
+        <a href="#sec-usuarios" data-rol="admin">Usuarios</a><a href="#sec-cambios">Cambios</a>
+      </nav>
+
+      <form id="form-reglas" class="config config-ancha">
+        <h3 id="sec-impuestos">Impuestos y jurisdicciones</h3>
+        <p class="guia">Todas las ventas gravables pagan la tasa del estado. Las máquinas que están en las ciudades de una jurisdicción pagan además su tasa local. Para una ciudad nueva con impuesto local, agregue una fila.</p>
+        <div class="fila-campos">
+          <label>Tasa del estado
+            <span class="campo-unidad"><input type="number" id="cfg-estado" min="0" max="30" step="0.01" required><span>%</span></span>
+          </label>
+          <label>Descuento por pagar a tiempo
+            <span class="campo-unidad"><input type="number" id="cfg-descuento" min="0" max="10" step="0.01"><span>%</span></span>
+          </label>
         </div>
+        <div class="tabla-envoltura"><table class="tabla tabla-edicion" id="tabla-jur"></table></div>
+        <div><button class="boton boton-secundario" type="button" id="btn-jur-nueva" data-rol="admin">Agregar jurisdicción</button></div>
+
+        <h3 id="sec-devoluciones">Devoluciones, cupones y agua</h3>
+        <div class="fila-campos">
+          <label>Devoluciones a clientes
+            <select id="cfg-dev">
+              <option value="cupones">Cupones de reembolso del mes</option>
+              <option value="porcentaje">Porcentaje fijo de lo vendido</option>
+            </select>
+          </label>
+          <label id="cfg-pct-campo">Porcentaje de devoluciones
+            <span class="campo-unidad"><input type="number" id="cfg-pct" min="0" max="100" step="0.1"><span>%</span></span>
+          </label>
+        </div>
+        <div class="fila-campos" id="cfg-cupones-campo">
+          <label>Cupones que compran las empresas
+            <select id="cfg-cupones-cuentan">
+              <option value="no">No cuentan: ni venta ni devolución</option>
+              <option value="si">Cuentan como venta</option>
+            </select>
+          </label>
+          <label>Máquinas donde una empresa compra cupones
+            <input type="text" id="cfg-cupones-empresas" placeholder="Número de máquina, separados por coma">
+            <small>Sus cupones siempre son de empresa, sin importar el monto.</small>
+          </label>
+          <label>En las demás, son de empresa desde
+            <span class="campo-unidad"><span>$</span><input type="number" id="cfg-cupones" min="0" step="1"></span>
+            <small>Por debajo de ese monto son devoluciones a clientes y se restan.</small>
+          </label>
+        </div>
+        <div class="fila-campos">
+          <label>Palabras que marcan un producto como agua
+            <input type="text" id="cfg-agua">
+          </label>
+          <label>Excepto si el nombre también dice
+            <input type="text" id="cfg-agua-no">
+            <small>Bebidas que dicen water pero llevan azúcar y sí pagan impuesto.</small>
+          </label>
+        </div>
+
+        <h3 id="sec-contabilidad">Contabilidad</h3>
+        <div class="fila-campos">
+          <label>A dónde se envían las ventas
+            <select id="cfg-destino">
+              <option value="quickbooks">QuickBooks Online</option>
+              <option value="excel">Solo Excel, sin enviar</option>
+              <option value="zoho" disabled>Zoho Books (todavía no disponible)</option>
+            </select>
+          </label>
+          <label>Cuenta de ingresos
+            <input type="text" id="cfg-cuenta" maxlength="90">
+          </label>
+          <label>Cliente de las ventas
+            <input type="text" id="cfg-cliente" maxlength="90">
+          </label>
+        </div>
+
+        <div class="guardar-reglas" data-rol="admin">
+          <label>Aplican desde
+            <input type="month" id="cfg-desde" required>
+          </label>
+          <label class="crece">Motivo del cambio
+            <input type="text" id="cfg-nota" maxlength="200" placeholder="Por ejemplo: máquinas nuevas en Sugar Land">
+          </label>
+          <button class="boton" type="submit">Guardar reglas</button>
+        </div>
+        <p class="nota-tabla" id="cfg-version"></p>
       </form>
-      <p class="nota-tabla">Las tasas del impuesto no se cambian aquí: las mantiene Intuit dentro de QuickBooks.</p>
+
+      <h3 id="sec-productos">Productos</h3>
+      <p class="guia">Todos los productos que se han vendido. Lo que se marca en el paso 2 queda guardado aquí y se propone solo el mes siguiente. Automático deja decidir a la regla del agua. Esta lista es la que se migra a QuickBooks al conectarlo.</p>
+      <div class="agregar" data-rol="operador">
+        <label for="prod-nuevo" class="oculto">Producto</label>
+        <input id="prod-nuevo" list="lista-productos" placeholder="Buscar o agregar un producto, como sale en el reporte">
+        <button class="boton boton-secundario" id="btn-prod-nuevo">Agregar</button>
+      </div>
+      <div class="tabla-envoltura tabla-alta"><table class="tabla tabla-edicion" id="tabla-catalogo"></table></div>
+
+      <h4 id="sec-nombres">Nombres que pueden ser el mismo producto</h4>
+      <p class="guia">Cada sistema de ventas escribe los productos a su manera: “12oz - Coke Classic Can” en uno y “Coke Classic - 12 oz. can” en otro. Al unirlos cuentan como un solo producto en el catálogo, en el Excel y en QuickBooks. No cambia el impuesto. Las sugerencias salen de los reportes del mes que está abierto.</p>
+      <div class="tabla-envoltura tabla-alta"><table class="tabla" id="tabla-sugerencias"></table></div>
+
+      <h3 id="sec-maquinas">Máquinas</h3>
+      <p class="guia">La lista queda guardada: no hay que subirla cada mes. La ciudad decide qué impuesto local paga cada máquina.</p>
+      <div class="agregar">
+        <label for="buscar-cfg-maquina" class="oculto">Buscar máquina</label>
+        <input id="buscar-cfg-maquina" type="search" placeholder="Buscar máquina o ciudad">
+        <label class="boton boton-secundario" for="archivo-maquinas" data-rol="operador">Subir vendor list</label>
+        <input type="file" id="archivo-maquinas" accept=".xlsx,.xls,.csv" class="oculto">
+      </div>
+      <div class="tabla-envoltura tabla-alta"><table class="tabla tabla-edicion" id="tabla-cfg-maquinas"></table></div>
+
+      <h3 id="sec-sistemas">Sistemas de ventas registrados</h3>
+      <p class="guia">Nayax, AV360, XMAI y Qingo ya vienen. Cuando llega el reporte de otro sistema, en el paso 1 se le dice una sola vez cuál columna es cada dato y se guarda con un nombre. Desde ahí se reconoce solo.</p>
+      <div class="tabla-envoltura"><table class="tabla" id="tabla-formatos"></table></div>
+
+      <div data-rol="admin">
+        <h3 id="sec-usuarios">Usuarios</h3>
+        <p class="guia" id="guia-usuarios"></p>
+        <div class="tabla-envoltura"><table class="tabla tabla-edicion" id="tabla-usuarios"></table></div>
+        <form id="form-usuario" class="fila-campos fila-usuario" autocomplete="off">
+          <label>Nombre<input type="text" id="usr-nombre" maxlength="80" required></label>
+          <label>Usuario<input type="text" id="usr-usuario" maxlength="40" required autocomplete="off"></label>
+          <label>Clave<input type="password" id="usr-clave" minlength="8" required autocomplete="new-password"></label>
+          <label>Rol<select id="usr-rol"></select></label>
+          <button class="boton boton-secundario" type="submit">Crear usuario</button>
+        </form>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-roles"></table></div>
+      </div>
+
+      <h3 id="sec-cambios">Historial de cambios</h3>
+      <div class="tabla-envoltura tabla-alta"><table class="tabla" id="tabla-bitacora"></table></div>
     </section>
 
     <!-- Como funciona -->
@@ -245,6 +400,16 @@
       <p class="tiquete-pie" id="tq-pie">Un solo pago al Texas Comptroller.</p>
     </div>
   </aside>
+
+  <div class="entrada" id="entrada" hidden>
+    <form class="entrada-caja" id="form-entrada">
+      <p class="marca-nombre">EzSnack</p>
+      <h2>Iniciar sesión</h2>
+      <label>Usuario<input type="text" id="ent-usuario" autocomplete="username" required></label>
+      <label>Clave<input type="password" id="ent-clave" autocomplete="current-password" required></label>
+      <button class="boton" type="submit" id="btn-entrar">Entrar</button>
+    </form>
+  </div>
 
   <div class="avisos" id="avisos" role="status" aria-live="polite"></div>
   <script src="/static/app.js" type="module"></script>
