@@ -3,8 +3,9 @@
 Los archivos que sube cada persona se leen en memoria y se guardan un rato con un codigo,
 para recalcular sin volver a subirlos: esos archivos no se escriben en disco ni en la base.
 Lo que si queda en la base de datos (ezsnack/almacen.py) es lo que debe durar: las reglas con su
-historial, las maquinas, la clasificacion de los productos, los sistemas registrados, los usuarios
-y el resultado de cada cierre. La conexion con QuickBooks va cifrada en una cookie del navegador.
+historial, las maquinas, la clasificacion de los productos, los sistemas registrados, los
+comisionistas con sus asignaciones, los usuarios y el resultado de cada cierre. La conexion con
+QuickBooks va cifrada en una cookie del navegador.
 
 Local:   uvicorn web.main:app --reload --port 8000
 """
@@ -275,6 +276,8 @@ def ver_config(u: dict = CONSULTA):
     return {"reglas": R, "base": alm.reglas_base(), "versiones": alm.versiones_reglas(),
             "maquinas": alm.maquinas(), "productos": catalogo, "sugerencias_nombres": sugerencias,
             "nombres_unidos": eq["lista"], "formatos": alm.formatos(),
+            "comisionistas": alm.comisionistas(),
+            "asignaciones_comision": alm.asignaciones_comision(f"{date.today().year}-{date.today().month:02d}"),
             "usuarios": alm.listar_usuarios() if u["rol"] == "admin" else [], "bitacora": alm.bitacora(),
             "almacen": alm.info()}
 
@@ -305,6 +308,32 @@ class CambioMaquina(BaseModel):
 def editar_maquina(id_maquina: str, c: CambioMaquina, u: dict = OPERADOR):
     alm.editar_maquina(id_maquina, c.model_dump(exclude_none=True), u["nombre"])
     return {"maquinas": alm.maquinas()}
+
+
+# ---------------- comisiones ----------------
+class Comisionista(BaseModel):
+    codigo: str
+    nombre: str
+    activo: bool = True
+
+
+@app.post("/api/config/comisionistas")
+def guardar_comisionista(c: Comisionista, u: dict = OPERADOR):
+    alm.guardar_comisionista(c.codigo, c.nombre, u["nombre"], c.activo)
+    return {"comisionistas": alm.comisionistas()}
+
+
+class Asignacion(BaseModel):
+    id_maquina: str
+    codigo: str | None = None    # None quita la asignacion
+    desde: str                   # "2026-09": mes desde el que comisiona
+
+
+@app.post("/api/config/comisiones/asignar")
+def asignar_comision(a: Asignacion, u: dict = OPERADOR):
+    alm.asignar_comision(a.id_maquina, a.codigo, u["nombre"], a.desde)
+    return {"asignaciones_comision": alm.asignaciones_comision(a.desde),
+            "comisionistas": alm.comisionistas()}
 
 
 class CambioProducto(BaseModel):
@@ -477,6 +506,7 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
         "cupones": res["cupones"],
         "exentos": _registros(res["exentos"].round(2)),
         "pagados": _registros(res["pagados"].round(2)),
+        "comisiones": res["comisiones"],
         "revisar": res["revisar"],
         "productos": sorted({alm.equivalencias()["unidos"].get(p, p) for p in c["integ"]["producto"].dropna().unique()}, key=str.lower),
         "verificacion": VERIFICACION.get(f"{anio}-{mes:02d}") if c.get("ejemplo") is False else None,
