@@ -287,6 +287,13 @@
           <label>Cliente de las ventas
             <input type="text" id="cfg-cliente" maxlength="90">
           </label>
+          <label>C&oacute;mo se agrupan los recibos
+            <select id="cfg-recibos">
+              <option value="jurisdiccion">Uno por tasa: estado, Houston y MTA</option>
+              <option value="maquina">Uno por m&aacute;quina</option>
+            </select>
+            <small>QuickBooks aplica una sola tasa por recibo, as&iacute; que lo m&aacute;s cerca de un recibo &uacute;nico son tres, uno por tasa. El total declarado es el mismo.</small>
+          </label>
         </div>
 
         <div class="guardar-reglas" data-rol="admin">

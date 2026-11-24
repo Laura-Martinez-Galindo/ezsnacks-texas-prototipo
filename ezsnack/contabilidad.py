@@ -370,6 +370,24 @@ def _recibo_productos(m, filas: pd.DataFrame, cliente: str, items: dict, prods: 
     return lineas
 
 
+def _por_jurisdiccion(maquinas: pd.DataFrame) -> pd.DataFrame:
+    """Junta todas las maquinas de una misma tasa en una sola fila: un recibo por jurisdiccion."""
+    m = maquinas.copy()
+    m["jurisdiccion"] = m["jurisdiccion"].fillna("")
+    filas = []
+    for juris, g in m.groupby("jurisdiccion", sort=False):
+        nombre = juris or SOLO_ESTADO
+        filas.append({
+            "id_maquina": re.sub(r"[^A-Za-z0-9]+", "", nombre)[:12] or "TX",
+            "maquina": f"{len(g)} maquinas - {nombre}",
+            "jurisdiccion": juris,
+            **{c: float(pd.to_numeric(g[c], errors="coerce").fillna(0).sum())
+               for c in g.columns if pd.api.types.is_numeric_dtype(g[c]) or c in ITEMS},
+            "direccion": None, "ciudad": None, "estado": None, "zip": None,
+        })
+    return pd.DataFrame(filas)
+
+
 def _recibo(m, cliente: str, items: dict, codigos: dict, anio: int, mes: int, fecha: str,
             lineas: list | None = None, fondos: str | None = None) -> dict | None:
     resumido = lineas is None
@@ -430,6 +448,20 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
         else:   # un recibo de la empresa con el mismo numero: no se toca
             ajenos[num] = existentes.pop(num)
     fondos = _fondos_no_depositados(qbo)
+    # El gerente declara un total por jurisdiccion, no maquina por maquina. QuickBooks aplica una
+    # sola tasa por recibo, asi que lo mas cerca que se puede estar de "un solo recibo" es uno por
+    # tasa: estado solo, Houston y Houston MTA.
+    if str(((R or {}).get("contabilidad") or {}).get("recibos") or "maquina") == "jurisdiccion":
+        juris = {str(k): (v or "") for k, v in zip(maquinas["id_maquina"], maquinas["jurisdiccion"])}
+        maquinas = _por_jurisdiccion(maquinas)
+        nuevo_detalle = {}
+        for clave, g in por_maquina.items():
+            destino = re.sub(r"[^A-Za-z0-9]+", "", juris.get(str(clave), "") or SOLO_ESTADO)[:12] or "TX"
+            nuevo_detalle.setdefault(destino, []).append(g)
+        por_maquina = {k: pd.concat(v).groupby("producto", as_index=False, sort=False)
+                       .agg(venta=("venta", "sum"), cantidad=("cantidad", "sum"),
+                            exento=("exento", "first"), pagado=("pagado", "first")).assign(id_maquina=k)
+                       for k, v in nuevo_detalle.items()}
     pedidos, resumidos, omitidos = [], 0, []
     for _, m in maquinas.iterrows():
         lineas = None
@@ -489,7 +521,10 @@ def enviar(qbo: QBO, maquinas: pd.DataFrame, anio: int, mes: int, esperado: list
         cuadre.append({"jurisdiccion": e["jurisdiccion"], "tasa": e["tasa"],
                        "base_app": e["base"], "base_qbo": q["base"],
                        "impuesto_app": e["impuesto"], "impuesto_qbo": q["impuesto"],
-                       "igual": abs(e["base"] - q["base"]) < 0.005 and abs(e["impuesto"] - q["impuesto"]) < 0.005})
+                       # La base tiene que dar igual al centavo. En el impuesto se admite un centavo:
+                       # la aplicacion lo redondea maquina por maquina y QuickBooks una sola vez
+                       # sobre el total de la tasa, que es como lo liquida el Comptroller.
+                       "igual": abs(e["base"] - q["base"]) < 0.005 and abs(e["impuesto"] - q["impuesto"]) <= 0.01 + 1e-9})
     for nombre, q in por_tasa.items():
         if esperado is not None and nombre not in {e["jurisdiccion"] for e in esperado}:
             cuadre.append({"jurisdiccion": nombre, "tasa": q["tasa"], "base_app": 0.0, "base_qbo": q["base"],

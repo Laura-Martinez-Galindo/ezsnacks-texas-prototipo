@@ -693,6 +693,7 @@ function pintarConfig() {
   $("#cfg-destino").value = R.contabilidad.destino;
   $("#cfg-cuenta").value = R.contabilidad.cuenta;
   $("#cfg-cliente").value = R.contabilidad.cliente;
+  $("#cfg-recibos").value = R.contabilidad.recibos || "jurisdiccion";
   $("#cfg-desde").value = `${estado.anio}-${String(estado.mes).padStart(2, "0")}`;
   $("#cfg-nota").value = "";
   $$("#form-reglas input, #form-reglas select").forEach((el) => { if (!el.closest(".guardar-reglas")) el.disabled = !puede("admin"); });
@@ -717,7 +718,8 @@ function reglasDelFormulario() {
     devoluciones: { metodo: $("#cfg-dev").value, porcentaje: +$("#cfg-pct").value || 0 },
     agua_palabras: lista($("#cfg-agua").value), agua_excepciones: lista($("#cfg-agua-no").value),
     jurisdicciones: jur,
-    contabilidad: { destino: $("#cfg-destino").value, cuenta: $("#cfg-cuenta").value, cliente: $("#cfg-cliente").value },
+    contabilidad: { destino: $("#cfg-destino").value, cuenta: $("#cfg-cuenta").value, cliente: $("#cfg-cliente").value,
+                    recibos: $("#cfg-recibos").value },
   };
 }
 $("#form-reglas").addEventListener("submit", (ev) => {

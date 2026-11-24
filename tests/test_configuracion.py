@@ -268,7 +268,8 @@ def test_recibo_de_la_empresa_con_el_mismo_numero_no_se_toca():
     num = f"V2609-{primero['id_maquina']}"
     q.recibos[num] = {"Id": "9999", "SyncToken": "3", "DocNumber": num, "TxnDate": "2026-09-30", "PrivateNote": "Venta de Humberto",
                       "Line": []}
-    e = contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], r["reglas"], r["detalle"])
+    reglas = {**r["reglas"], "contabilidad": {**(r["reglas"].get("contabilidad") or {}), "recibos": "maquina"}}
+    e = contabilidad.enviar(q, r["maquinas"], 2026, 9, r["declaracion"]["quickbooks_esperado"], reglas, r["detalle"])
     assert q.recibos[num]["PrivateNote"] == "Venta de Humberto"
     assert any(x["recibo"] == num for x in e["errores"])
 
