@@ -270,16 +270,24 @@ function pintarArchivos(d) {
   pintarMaquinas();
 }
 
+const BASICOS = ["maquina", "producto", "total"];
 function pintarSinLeer(sinLeer = [], campos = {}, genericos = []) {
   const todos = [...sinLeer.map((f) => ({ ...f, falla: true })), ...genericos];
   $("#mapeos").hidden = !todos.length;
+  const sel = (f, k, nombre) => `
+    <label>${esc(nombre)}<select data-campo="${k}"><option value="">No tiene</option>${
+      f.columnas.map((c) => `<option ${f.mapeo[k] === c ? "selected" : ""}>${esc(c)}</option>`).join("")}${
+      k === "maquina" ? `<option value="__fija__" ${f.mapeo.maquina_fija ? "selected" : ""}>Todo el archivo es de una máquina</option>` : ""}</select></label>`;
   $("#lista-mapeos").innerHTML = todos.map((f, i) => `
     <li class="mapeo" data-archivo="${esc(f.archivo)}">
-      <p><strong>${esc(f.archivo)}</strong> <span class="estado ${f.falla ? "estado-revisar" : "estado-ok"}">${f.falla ? "Falta indicar columnas" : "Reconocido"}</span></p>
-      <div class="mapeo-campos">${Object.entries(campos).map(([k, nombre]) => `
-        <label>${esc(nombre)}<select data-campo="${k}"><option value="">No tiene</option>${
-          f.columnas.map((c) => `<option ${f.mapeo[k] === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>`).join("")}
+      <p><strong>${esc(f.archivo)}</strong> <span class="estado ${f.falla ? "estado-revisar" : "estado-ok"}">${f.falla ? "Indique estas tres cosas" : "Reconocido"}</span></p>
+      <div class="mapeo-campos">
+        ${BASICOS.map((k) => sel(f, k, campos[k] || k)).join("")}
+        <label data-fija ${f.mapeo.maquina_fija ? "" : "hidden"}>Número de máquina<input type="text" data-campo-fija maxlength="8" placeholder="159" value="${esc(f.mapeo.maquina_fija || "")}"></label>
       </div>
+      <details class="mapeo-mas"><summary>Otros campos, si el archivo los trae</summary>
+        <div class="mapeo-campos">${Object.entries(campos).filter(([k]) => !BASICOS.includes(k)).map(([k, nombre]) => sel(f, k, nombre)).join("")}</div>
+      </details>
       <div class="mapeo-guardar">
         <label>Nombre del sistema<input type="text" data-sistema maxlength="24" placeholder="Por ejemplo, Cantaloupe" value="${esc(f.falla ? "" : f.fuente)}"></label>
         <button class="boton" data-registrar="${i}">Registrar este sistema</button>
@@ -287,13 +295,25 @@ function pintarSinLeer(sinLeer = [], campos = {}, genericos = []) {
       </div>
     </li>`).join("");
 }
+document.addEventListener("change", (ev) => {
+  const sel = ev.target.closest(".mapeo select[data-campo='maquina']");
+  if (!sel) return;
+  const campo = sel.closest(".mapeo").querySelector("[data-fija]");
+  if (campo) campo.hidden = sel.value !== "__fija__";
+});
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-aplicar], [data-registrar]");
   if (!b) return;
   const li = b.closest(".mapeo");
   const m = {};
   li.querySelectorAll("select").forEach((sel) => { if (sel.value) m[sel.dataset.campo] = sel.value; });
-  if (!m.maquina || !m.producto || !(m.total || m.efectivo || m.tarjeta)) { avisar("Indique la máquina, el producto y un valor vendido.", true); return; }
+  if (m.maquina === "__fija__") {
+    delete m.maquina;
+    const n = (li.querySelector("[data-campo-fija]")?.value || "").trim();
+    if (!/^\d+$/.test(n)) { avisar("Escriba el número de la máquina, por ejemplo 159.", true); return; }
+    m.maquina_fija = n;
+  }
+  if (!(m.maquina || m.maquina_fija) || !m.producto || !(m.total || m.efectivo || m.tarjeta)) { avisar("Indique la máquina, el producto y el valor vendido.", true); return; }
   if (b.dataset.registrar !== undefined) {
     const nombre = li.querySelector("[data-sistema]").value.trim();
     if (!nombre) { avisar("Póngale un nombre al sistema, por ejemplo Cantaloupe.", true); return; }

@@ -76,7 +76,10 @@ class Lectura:
 
 def id_maquina(nombre) -> str | None:
     """'EzSnack 146 - North American university' -> '146'."""
-    m = re.search(r"ez\s*snack\s*#?\s*(\d+)", str(nombre or ""), re.I)
+    texto = str(nombre or "").strip()
+    if texto.isdigit():     # cuando se indica a mano que todo el archivo es de una maquina
+        return texto
+    m = re.search(r"ez\s*snack\s*#?\s*(\d+)", texto, re.I)
     return m.group(1) if m else None
 
 
@@ -148,7 +151,8 @@ def _encabezado_generico(crudo: pd.DataFrame, mapeo: dict | None) -> tuple[int, 
     for i in range(min(15, len(crudo))):
         cols = [re.sub(r"\s+", " ", str(c)).strip() for c in crudo.iloc[i].tolist() if pd.notna(c)]
         if mapeo:
-            if all(v in cols for v in mapeo.values() if v):
+            # maquina_fija no es una columna del archivo: es la maquina que vale para todo
+            if all(v in cols for k, v in mapeo.items() if v and k != "maquina_fija"):
                 return i, mapeo
             continue
         m = proponer_mapeo(cols)
@@ -160,10 +164,19 @@ def _encabezado_generico(crudo: pd.DataFrame, mapeo: dict | None) -> tuple[int, 
 def _generico(df: pd.DataFrame, mapeo: dict, fuente: str) -> Lectura:
     """Lee un reporte de formato no conocido con las columnas indicadas en el mapeo."""
     m = {k: v for k, v in mapeo.items() if v and v in df.columns}
-    if "maquina" not in m or "producto" not in m or not ({"total", "efectivo", "tarjeta"} & set(m)):
-        raise FormatoDesconocido("Faltan columnas: máquina, producto y un valor vendido.", list(df.columns), m)
+    # Hay reportes de tienda (el de Qingo, por ejemplo) que no traen la columna de maquina porque
+    # todo el archivo es de una sola. En ese caso se indica la maquina una vez y vale para todo.
+    fija = str(mapeo.get("maquina_fija") or "").strip()
+    if "producto" not in m or not ({"total", "efectivo", "tarjeta"} & set(m)) or not (m.get("maquina") or fija):
+        raise FormatoDesconocido("Indique el producto, el valor vendido y la máquina.", list(df.columns), m)
     leidas = len(df)
-    df, totales = _filas_validas(df, m["maquina"], m["producto"])
+    if m.get("maquina"):
+        df, totales = _filas_validas(df, m["maquina"], m["producto"])
+    else:
+        ok = df[m["producto"]].notna() & (df[m["producto"]].astype(str).str.strip() != "")
+        df, totales = df[ok], int((~ok).sum())
+        m = dict(m, maquina="__maquina__")
+        df = df.assign(__maquina__=fija)
     cero = pd.Series(0.0, index=df.index)
     total = _num(df[m["total"]]) if "total" in m else None
     efectivo = _num(df[m["efectivo"]]) if "efectivo" in m else None
@@ -184,7 +197,8 @@ def _generico(df: pd.DataFrame, mapeo: dict, fuente: str) -> Lectura:
     filas = _salida(fuente, df[m["maquina"]][~sin_valor], df[m["producto"]][~sin_valor], cant[~sin_valor],
                     efectivo=efectivo[~sin_valor], tarjeta=tarjeta[~sin_valor], cupones=cupones[~sin_valor])
     return Lectura("", fuente, filas, leidas, {"filas de total o vacias": totales, "filas sin valor": int(sin_valor.sum())},
-                   generico=True, columnas=[str(c) for c in df.columns], mapeo=m)
+                   generico=True, columnas=[str(c) for c in df.columns if c != "__maquina__"],
+                   mapeo={k: v for k, v in m.items() if v != "__maquina__"} | ({"maquina_fija": fija} if fija else {}))
 
 
 def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos: list[dict] | None = None) -> Lectura:
@@ -221,7 +235,7 @@ def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos:
                 return terminar(lector(tabla(crudo, fila)), crudo, fila)
         for formato in formatos or []:
             m = {k: v for k, v in (formato.get("mapeo") or {}).items() if v}
-            if not m.get("maquina") or not m.get("producto"):
+            if not (m.get("maquina") or m.get("maquina_fija")) or not m.get("producto"):
                 continue
             for crudo in hojas:
                 hallado = _encabezado_generico(crudo, m)
