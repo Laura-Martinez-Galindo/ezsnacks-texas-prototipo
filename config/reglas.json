@@ -1,12 +1,12 @@
 {
- "_nota": "Reglas del cierre mensual de EzSnack Texas. Devoluciones: los cupones de reembolso del mes (los que compran las empresas son venta). Agua: todo producto que diga water, como lo filtra el gerente. Lectores que no traen el numero de maquina (XMAI en tiendas, Qingo): se les asigna la maquina de maquina_por_lector.",
+ "_nota": "Reglas del cierre mensual de EzSnack Texas. Se resta un 3 % por desperdicio, como lo hace el gerente en su Excel (x0.97); la otra opcion es restar los cupones de reembolso del mes. Agua: todo producto que diga water, como lo filtra el gerente. Lectores que no traen el numero de maquina (XMAI en tiendas, Qingo): se les asigna la maquina de maquina_por_lector.",
  "tasa_estado": 6.25,
  "tasa_compras": 6.25,
  "descuento_a_tiempo_pct": 0.5,
  "cupones_empresa_minimo": 100,
  "cupones_empresa_cuentan": false,
  "devoluciones": {
-  "metodo": "cupones",
+  "metodo": "porcentaje",
   "porcentaje": 3.0
  },
  "jurisdicciones": {
@@ -35,7 +35,13 @@
  ],
  "agua_excepciones": [],
  "maquina_por_lector": {
-  "XMAI": "160",
-  "Qingo": "159"
+  "XMAI": [
+   "160",
+   "161",
+   "162"
+  ],
+  "Qingo": [
+   "159"
+  ]
  }
 }

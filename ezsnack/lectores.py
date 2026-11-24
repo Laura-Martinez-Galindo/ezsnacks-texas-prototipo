@@ -256,7 +256,10 @@ def maquina_por_lector() -> dict[str, str]:
         import json
         from pathlib import Path as _P
         ruta = _P(__file__).resolve().parents[1] / "config" / "reglas.json"
-        return {str(k): str(v) for k, v in (json.loads(ruta.read_text(encoding="utf-8")).get("maquina_por_lector") or {}).items()}
+        crudo = json.loads(ruta.read_text(encoding="utf-8")).get("maquina_por_lector") or {}
+        # El valor puede ser una maquina o la lista de maquinas de ese lector. El reporte no separa
+        # las ventas por maquina, asi que todas quedan en la primera; las demas son del mismo local.
+        return {str(k): str(v[0] if isinstance(v, list) else v) for k, v in crudo.items() if v}
     except Exception:
         return {}
 

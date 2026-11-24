@@ -94,7 +94,7 @@ def test_excel_tiene_las_hojas_y_formulas_del_integrado(lecturas):
     assert [c.value for c in ws[1]][:3] == ["Source", "Machine", "Product"]
     formulas = [ws.cell(row=f, column=4).value for f in range(ws.max_row - 17, ws.max_row + 1)]
     assert "Coupons sold to companies" in formulas
-    assert "Returns to customer (coupons)" in formulas   # por defecto se restan los cupones del mes
+    assert any(str(f).startswith("Returns to customer") for f in formulas)   # por defecto se restan los cupones del mes
 
 
 def test_api_de_ejemplo_y_excel():
@@ -187,10 +187,10 @@ def test_comparacion_encuentra_la_maquina_que_falto(lecturas):
 
 
 def test_reglas_por_defecto_siguen_el_proceso_del_gerente(lecturas):
-    """Sin tocar nada: devoluciones por cupones y agua = todo producto que diga water, endulzado o no."""
+    """Sin tocar nada: se resta el 3 % de desperdicio y agua = todo producto que diga water."""
     integ = cierre.integrar(lecturas, maquinas.leer(D / "vendor_list_EJEMPLO.xlsx"))
     r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
     p = r["pasos"]
-    assert p["devoluciones_metodo"] == "cupones"
+    assert p["devoluciones_metodo"] == "porcentaje" and p["devoluciones_pct"] == 3.0
     con_water = integ[integ["producto"].str.contains(r"\bwater\b", case=False, regex=True)]
     assert p["agua"]["total"] == pytest.approx(float((con_water["efectivo"] + con_water["tarjeta"]).sum()), abs=0.02)

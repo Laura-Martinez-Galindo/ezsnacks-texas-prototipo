@@ -182,10 +182,12 @@ def test_al_conectar_un_quickbooks_vacio_se_migran_las_reglas():
     assert m2["catalogo"]["creados"] == 0 and len(q.codes) == 3
 
 
-def test_devoluciones_por_defecto_son_los_cupones():
+def test_por_defecto_se_resta_el_desperdicio_del_gerente():
+    """El Excel del gerente multiplica por 0.97: un 3 % de desperdicio."""
     _, integ = _integ()
     r = cierre.calcular(integ, cierre.Ajustes(), 2026, 9)
-    assert r["pasos"]["devoluciones_metodo"] == "cupones"
+    assert r["pasos"]["devoluciones_metodo"] == "porcentaje"
+    assert r["pasos"]["devoluciones_pct"] == 3.0
 
 
 

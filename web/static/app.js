@@ -373,7 +373,7 @@ function pintarProductos(d) {
   const C = d.cupones;
   const porPct = d.pasos.devoluciones_metodo === "porcentaje";
   $("#vista-productos .guia").textContent = porPct
-    ? `Las devoluciones se calculan como el ${pct(d.pasos.devoluciones_pct)} de lo vendido (regla de porcentaje fijo). Los cupones del reporte, ${dinero(d.pasos.cupones_reporte)}, no entran en la cuenta.`
+    ? `Se resta el ${pct(d.pasos.devoluciones_pct)} de lo vendido por desperdicio: producto que se pierde o que la m\u00e1quina no entrega y nadie reclama. Es la regla del gerente. Los cupones del reporte, ${dinero(d.pasos.cupones_reporte)}, no entran en esta cuenta.`
     : d.pasos.cupones_empresa_cuentan
       ? "Los que compra una empresa para sus empleados son venta. Los demás se devolvieron a clientes que reclamaron y se restan."
       : `Los que compra una empresa para sus empleados (${dinero(d.pasos.cupones_empresa_fuera)} este mes) no cuentan: ni venta ni devolución. Los demás se devolvieron a clientes que reclamaron y se restan.`;
@@ -427,7 +427,7 @@ function pintarDeclaracion(d) {
   const filas = [
     { c: "Ventas en efectivo y tarjeta", k: "ventas" },
     ...(porPct || !p.cupones_empresa_cuentan ? [] : [{ c: "Cupones que compró una empresa", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
-    { c: porPct ? `Devoluciones a clientes, ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes", k: "devoluciones", menos: true },
+    { c: porPct ? `Desperdicio, ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes", k: "devoluciones", menos: true },
     { c: "Ventas netas", k: "neto", _clase: "fila-fuerte" },
     { c: "Agua", k: "agua", menos: true },
     { c: "Comprado con impuesto pagado", k: "walmart", menos: true },
@@ -596,7 +596,7 @@ function imprimirTiquete(d) {
   const espacio = () => L.push(`<div class="tq-espacio"></div>`);
   linea("Efectivo y tarjeta", dinero(p.ventas.total));
   if (p.cupones_empresa.total) linea("Cupones a empresas", "+" + dinero(p.cupones_empresa.total), "tq-sub");
-  if (p.devoluciones.total) linea("Devueltos a clientes", "-" + dinero(p.devoluciones.total), "tq-sub");
+  if (p.devoluciones.total) linea(p.devoluciones_metodo === "porcentaje" ? "Desperdicio" : "Devueltos a clientes", "-" + dinero(p.devoluciones.total), "tq-sub");
   linea("Agua", "-" + dinero(p.agua.total), "tq-sub");
   linea("Ya pagadas", "-" + dinero(p.walmart.total), "tq-sub");
   linea("Gravables", dinero(p.gravable.total));
@@ -920,7 +920,7 @@ document.addEventListener("click", async (ev) => {
       $("#titulo-detalle").textContent = `Cierre de ${MESES[c.mes - 1]} ${c.anio}`;
       const fila = (t, k) => ({ t, v: p[k]?.total });
       tabla($("#tabla-detalle"), [{ t: "", v: (f) => f.t }, { t: "Valor", num: true, v: (f) => dinero(f.v) }], [
-        fila("Ventas en efectivo y tarjeta", "ventas"), fila("Devoluciones a clientes", "devoluciones"), fila("Ventas netas", "neto"),
+        fila("Ventas en efectivo y tarjeta", "ventas"), fila("Desperdicio o devoluciones", "devoluciones"), fila("Ventas netas", "neto"),
         fila("Agua", "agua"), fila("Comprado con impuesto pagado", "walmart"), fila("Ventas gravables", "gravable"),
         ...d.locales.map((l) => ({ t: `Base de ${l.nombre_comptroller} (${pct(l.tasa)})`, v: l.base_exacta ?? l.base })),
         { t: "Impuesto según el Comptroller", v: d.impuesto_total },

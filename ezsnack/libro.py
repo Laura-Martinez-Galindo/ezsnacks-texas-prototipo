@@ -184,7 +184,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
     fila(ce, "Coupons sold to companies", "=0",
          "=0" if por_pct else f'=SUMIF({M("E")},"sale",{M("H")})', "cupones_empresa", unir=False)
     fila(t, "Total sales", f"=F{v}+F{ce}", f"=G{v}+G{ce}", "total", unir=False)
-    fila(dv, f"Returns to customer ({dev['porcentaje']:g} %)" if por_pct else "Returns to customer (coupons)",
+    fila(dv, f"Returns to customer - waste ({dev['porcentaje']:g} %)" if por_pct else "Returns to customer (coupons)",
          f"=F{t}-F{m}", f"=G{t}-G{m}", "devoluciones", unir=False)
     fila(m, "Total minus returns to customer", suma("I"), suma("J"), "neto", verde, verden)
     fila(w, "Water Sells", suma("K"), suma("L"), "agua", unir=False)
@@ -230,7 +230,7 @@ def libro(res: dict, lecturas: list, anio: int, mes: int) -> bytes:
         ("Nayax coupons", "No payment method explicitly identifies coupons. Prepaid and Monyx amounts are kept separate."),
         ("Coupons", "Hoerbiger buys coupons every month for its employees: that is a sale. The rest are sent to "
                     "customers who report a failed vend: that is a return."),
-        ("Returns", f"Returns to customer are {dev['porcentaje']:g} % of cash and credit sales, machine by machine." if por_pct
+        ("Returns", f"Returns to customer: {dev['porcentaje']:g} % of cash and credit sales, the waste the manager estimates (product lost or not delivered by the machine)." if por_pct
                     else "Returns to customer are the refund coupons of the month. Coupons bought by companies are "
                     + ("sales." if res["reglas"].get("cupones_empresa_cuentan") else "not counted (marked company in Machines).")),
         ("Machines", "One row per machine: it is the sales receipt sent to QuickBooks. The summary adds that sheet."),
