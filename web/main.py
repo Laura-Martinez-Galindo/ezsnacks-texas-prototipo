@@ -478,6 +478,7 @@ def _resultado(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
         "exentos": _registros(res["exentos"].round(2)),
         "pagados": _registros(res["pagados"].round(2)),
         "revisar": res["revisar"],
+        "parejas": res["parejas"],
         "productos": sorted({alm.equivalencias()["unidos"].get(p, p) for p in c["integ"]["producto"].dropna().unique()}, key=str.lower),
         "verificacion": VERIFICACION.get(f"{anio}-{mes:02d}") if c.get("ejemplo") is False else None,
     }

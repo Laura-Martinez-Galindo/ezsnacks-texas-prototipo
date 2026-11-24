@@ -11,8 +11,24 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const estado = {
   anio: null, mes: null, reglas: null, qbo: false, conectado: false, empresa: null,
   codigo: null, ejemplo: false, form: null, res: null, envio: null,
-  ajustes: { exentos: null, pagados: null, cupones_empresa: null }, mapeos: {}, cfg: null, usuario: null, roles: {},
+  ajustes: { exentos: null, pagados: null, cupones_empresa: null, parejas: [] }, mapeos: {}, cfg: null, usuario: null, roles: {},
 };
+
+/* Lo marcado se guarda en este navegador, por mes, para que al volver no haya que marcar de nuevo.
+   Si el navegador no deja guardar (ventana privada, por ejemplo), la pagina funciona igual. */
+const LLAVE = () => `ezsnack:marcado:${estado.anio}-${String(estado.mes).padStart(2, "0")}`;
+function guardarMarcado() {
+  try { localStorage.setItem(LLAVE(), JSON.stringify({ ajustes: estado.ajustes, mapeos: estado.mapeos })); } catch (e) { /* sin guardar */ }
+}
+function recuperarMarcado() {
+  try {
+    const g = JSON.parse(localStorage.getItem(LLAVE()) || "null");
+    if (!g) return false;
+    estado.ajustes = { ...estado.ajustes, ...(g.ajustes || {}) };
+    estado.mapeos = { ...estado.mapeos, ...(g.mapeos || {}) };
+    return true;
+  } catch (e) { return false; }
+}
 const puede = (rol) => ({ consulta: 0, operador: 1, admin: 2 }[estado.usuario?.rol] ?? -1) >= { consulta: 0, operador: 1, admin: 2 }[rol];
 const fecha = (iso) => (iso ? new Date(iso).toLocaleString("es", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -59,6 +75,7 @@ const dosCol = (el, filas, cab = ["", ""]) => tabla(el, [{ t: cab[0], html: (f) 
 /* ---------- periodo ---------- */
 function ponerPeriodo(anio, mes) {
   estado.anio = anio; estado.mes = mes;
+  if (recuperarMarcado() && estado.res) recalcular();
   $("#mes").value = mes; $("#anio").value = anio;
   const sig = new Date(anio, mes, 20);
   $("#titulo-cierre").textContent = `Cierre de ${MESES[mes - 1]} ${anio}`;
@@ -211,6 +228,7 @@ $("#btn-ejemplo").addEventListener("click", () => ocupado($("#btn-ejemplo"), () 
 
 let espera = null;
 function recalcular() {
+  guardarMarcado();
   clearTimeout(espera);
   espera = setTimeout(async () => {
     if (!estado.codigo) return;
@@ -395,6 +413,20 @@ function pintarProductos(d) {
   ], filas, ["", "", "Total a descontar", dinero(d.pasos.walmart.total)]);
   if (!filas.length) $("#tabla-pagados").innerHTML = `<tbody><tr><td>Sin productos. Suba la lista en el paso 1 o agréguelos aquí.</td></tr></tbody>`;
 
+  // Parejas por confirmar: el mismo producto con dos nombres, uno sin el tamaño
+  const PJ = [...(d.parejas || []), ...(estado.ajustes.parejas || [])
+    .filter((x) => !(d.parejas || []).some((f) => f.producto === x.producto))
+    .map((x) => ({ ...x, manual: true }))];
+  $("#parejas").hidden = !PJ.length;
+  if (PJ.length) {
+    tabla($("#tabla-parejas"), [
+      { t: "Es el mismo", html: (f) => `<input type="checkbox" data-pagado="${esc(f.producto)}" ${f.marcado ? "checked" : ""} aria-label="Es el mismo producto: ${esc(f.producto)}">` },
+      { t: "Nombre en el reporte", html: (f) => `${esc(f.producto)}${f.manual ? `<span class="sub">Agregado aquí</span>` : ""}` },
+      { t: "Nombre en su lista", v: (f) => f.buscado || "—" },
+      { t: "Ventas", num: true, v: (f) => (f.ventas ? dinero(f.ventas) : "") },
+    ], PJ);
+  }
+
   const C = d.cupones;
   const porPct = d.pasos.devoluciones_metodo === "porcentaje";
   $("#vista-productos .guia").textContent = porPct
@@ -432,18 +464,34 @@ async function recordar(cambio) {
   try { estado.cfg.productos = (await postJSON("/api/config/productos", cambio)).productos; pintarCatalogo(); } catch { /* el cierre sigue igual */ }
 }
 function agregar(input, clave) {
-  const nombre = input.value.trim();
-  if (!estado.res.productos.includes(nombre)) { avisar("Elija un producto de la lista.", true); return; }
+  // Se pueden agregar varios de una, separados por punto y coma
+  const nombres = input.value.split(/[;\n]+/).map((x) => x.trim()).filter(Boolean);
+  const buenos = nombres.filter((n) => estado.res.productos.includes(n));
+  const malos = nombres.filter((n) => !buenos.includes(n));
+  if (!buenos.length) { avisar("Elija un producto de la lista.", true); return; }
+  if (malos.length) avisar(`No están entre los productos vendidos: ${malos.join(", ")}`, true);
   const marcadosAhora = clave === "exentos"
     ? estado.res.exentos.filter((f) => f.marcado).map((f) => f.producto)
     : estado.res.pagados.filter((f) => f.marcado).map((f) => f.producto);
-  estado.ajustes[clave] = [...new Set([...(estado.ajustes[clave] ?? marcadosAhora), nombre])];
-  recordar(clave === "exentos" ? { nombre, exento: true } : { nombre, pagado_habitual: true });
+  estado.ajustes[clave] = [...new Set([...(estado.ajustes[clave] ?? marcadosAhora), ...buenos])];
+  buenos.forEach((nombre) => recordar(clave === "exentos" ? { nombre, exento: true } : { nombre, pagado_habitual: true }));
   input.value = "";
+  input.focus();
   recalcular();
 }
 $("#btn-otro-exento").addEventListener("click", () => agregar($("#otro-exento"), "exentos"));
 $("#btn-otro-pagado").addEventListener("click", () => agregar($("#otro-pagado"), "pagados"));
+$("#btn-otra-pareja").addEventListener("click", () => {
+  const input = $("#otra-pareja");
+  const nombres = input.value.split(/[;\n]+/).map((x) => x.trim()).filter(Boolean);
+  const buenos = nombres.filter((n) => estado.res.productos.includes(n));
+  if (!buenos.length) { avisar("Elija un producto de los que se vendieron este mes.", true); return; }
+  estado.ajustes.parejas = [...(estado.ajustes.parejas || []),
+    ...buenos.filter((n) => !(estado.ajustes.parejas || []).some((x) => x.producto === n))
+      .map((n) => ({ producto: n, buscado: "", ventas: 0, marcado: false }))];
+  input.value = ""; input.focus();
+  mostrar(estado.res);
+});
 
 /* ---------- 3. declaracion ---------- */
 function pintarDeclaracion(d) {

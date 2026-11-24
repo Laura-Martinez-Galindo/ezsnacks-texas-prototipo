@@ -120,15 +120,25 @@
       <div class="tabla-envoltura"><table class="tabla" id="tabla-exentos"></table></div>
       <div class="agregar">
         <label for="otro-exento" class="oculto">Otro producto exento</label>
-        <input id="otro-exento" list="lista-productos" placeholder="Agregar otro producto exento">
+        <input id="otro-exento" list="lista-productos" placeholder="Agregar productos exentos; se pueden varios separados por punto y coma">
         <button class="boton boton-secundario" id="btn-otro-exento">Agregar</button>
       </div>
 
       <h3>Comprado con impuesto pagado</h3>
       <div class="tabla-envoltura"><table class="tabla" id="tabla-pagados"></table></div>
+      <section id="parejas" class="bloque-aviso" hidden>
+        <h4>Confirme si estos productos son el mismo</h4>
+        <p class="guia">El reporte trae estos nombres y se parecen a uno que usted marc&oacute;, pero el nombre no dice el tama&ntilde;o, as&iacute; que no se puede estar seguro. Marque los que s&iacute; sean el mismo producto.</p>
+        <div class="tabla-envoltura"><table class="tabla" id="tabla-parejas"></table></div>
+        <div class="agregar-linea">
+          <label for="otra-pareja" class="oculto">Otro producto que sea el mismo</label>
+          <input id="otra-pareja" list="lista-productos" placeholder="Agregar otra pareja: escriba el producto del reporte">
+          <button class="boton boton-secundario" id="btn-otra-pareja">Agregar</button>
+        </div>
+      </section>
       <div class="agregar">
         <label for="otro-pagado" class="oculto">Otro producto comprado con impuesto</label>
-        <input id="otro-pagado" list="lista-productos" placeholder="Agregar otro producto">
+        <input id="otro-pagado" list="lista-productos" placeholder="Agregar productos; se pueden varios separados por punto y coma">
         <button class="boton boton-secundario" id="btn-otro-pagado">Agregar</button>
       </div>
       <datalist id="lista-productos"></datalist>

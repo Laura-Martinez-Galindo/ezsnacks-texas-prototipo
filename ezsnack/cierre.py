@@ -280,10 +280,12 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
         revisar.append({"texto": m["maquina"], "detalle": "En la lista de máquinas figura como inactiva, pero este mes vendió. Actívela si ya está funcionando."})
     for _, m in negativas.iterrows():
         revisar.append({"texto": m["maquina"], "detalle": "Casi todo lo que vendió es agua o producto que ya pagó impuesto, así que no queda nada gravable."})
-    for _, f in cruce[cruce["estado"] == "dudoso"].iterrows():
-        revisar.append({"texto": f["producto"], "detalle": f"Se parece a “{f['buscado']}”, que usted marcó, pero este nombre no dice el tamaño. Si es el mismo producto, márquelo también."})
+    # Los parecidos no van a "para revisar": tienen su propia seccion, donde se confirma uno por uno
+    parejas = [{"producto": f["producto"], "buscado": f["buscado"], "ventas": float(f.get("ventas") or 0),
+                "marcado": bool(f["marcado"])}
+               for _, f in cruce[cruce["estado"] == "dudoso"].iterrows()]
     for _, f in cruce[cruce["estado"] == "sin_ventas"].iterrows():
         revisar.append({"texto": f["buscado"], "detalle": "Usted lo marcó como comprado con impuesto ya pagado, pero este mes no se vendió, así que no se descontó nada."})
 
     return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "cupones": cupones, "exentos": lista_exentos, "pagados": cruce,
-            "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}
+            "revisar": revisar, "parejas": parejas, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}
