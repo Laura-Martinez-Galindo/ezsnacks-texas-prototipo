@@ -66,6 +66,9 @@ def _primero(s: pd.Series):
 def integrar(lecturas: list[Lectura], maquinas: pd.DataFrame) -> pd.DataFrame:
     """Una fila por lector, maquina y producto, con la ciudad de la maquina."""
     filas = pd.concat([l.filas for l in lecturas], ignore_index=True)
+    # Las maquinas marcadas TBD son de prueba: lo que registran no es una venta real y no entra
+    # al cierre ni aparece para revisar.
+    filas = filas[~filas["maquina"].astype(str).str.contains(r"\bTBD\b", case=False, regex=True, na=False)]
     filas["id_maquina"] = filas["id_maquina"].fillna("")
     for c in ("costo", "utilidad", "impuesto"):
         filas[c] = pd.to_numeric(filas[c], errors="coerce")
@@ -272,15 +275,15 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
 
     revisar = []
     for _, m in pm[~pm["en_lista"]].iterrows():
-        revisar.append({"texto": m["maquina"], "detalle": "No está en la lista de máquinas: no cuenta para Houston ni MTA."})
+        revisar.append({"texto": m["maquina"], "detalle": "Vendió este mes pero no está en la lista de máquinas, así que no se sabe en qué ciudad está: paga solo el impuesto del estado."})
     for _, m in pm[pm["en_lista"] & ~pm["activa"]].iterrows():
-        revisar.append({"texto": m["maquina"], "detalle": "Está inactiva en la lista, pero tuvo ventas."})
+        revisar.append({"texto": m["maquina"], "detalle": "En la lista de máquinas figura como inactiva, pero este mes vendió. Actívela si ya está funcionando."})
     for _, m in negativas.iterrows():
-        revisar.append({"texto": m["maquina"], "detalle": "Vendió casi solo productos sin impuesto: su venta gravable se dejó en cero."})
+        revisar.append({"texto": m["maquina"], "detalle": "Casi todo lo que vendió es agua o producto que ya pagó impuesto, así que no queda nada gravable."})
     for _, f in cruce[cruce["estado"] == "dudoso"].iterrows():
-        revisar.append({"texto": f["producto"], "detalle": f"Puede ser “{f['buscado']}”, pero el nombre no dice el tamaño."})
+        revisar.append({"texto": f["producto"], "detalle": f"Se parece a “{f['buscado']}”, que usted marcó, pero este nombre no dice el tamaño. Si es el mismo producto, márquelo también."})
     for _, f in cruce[cruce["estado"] == "sin_ventas"].iterrows():
-        revisar.append({"texto": f["buscado"], "detalle": "Está en la lista de compras, pero no tuvo ventas este mes."})
+        revisar.append({"texto": f["buscado"], "detalle": "Usted lo marcó como comprado con impuesto ya pagado, pero este mes no se vendió, así que no se descontó nada."})
 
     return {"pasos": pasos, "declaracion": declaracion, "maquinas": pm, "cupones": cupones, "exentos": lista_exentos, "pagados": cruce,
             "revisar": revisar, "detalle": d, "reglas": R, "lista_exentos": sorted(exentos), "lista_pagados": sorted(pagados)}

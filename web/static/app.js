@@ -48,7 +48,7 @@ async function ocupado(boton, fn) {
 }
 
 function tabla(el, columnas, filas, pie) {
-  const cab = `<thead><tr>${columnas.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.t)}</th>`).join("")}</tr></thead>`;
+  const cab = `<thead><tr>${columnas.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.t)}${c.s ? `<span class="sub">${esc(c.s)}</span>` : ""}</th>`).join("")}</tr></thead>`;
   const cuerpo = filas.map((f) => `<tr class="${f._clase || ""}">${columnas.map((c) => `<td class="${c.num ? "num" : ""}">${c.html ? c.html(f) : esc(c.v(f))}</td>`).join("")}</tr>`).join("");
   const p = pie ? `<tfoot><tr>${pie.map((x, i) => `<td class="${columnas[i]?.num ? "num" : ""}">${esc(x)}</td>`).join("")}</tr></tfoot>` : "";
   el.innerHTML = cab + `<tbody>${cuerpo}</tbody>` + p;
@@ -240,7 +240,11 @@ function mostrar(d) {
   imprimirTiquete(d);
 }
 
-const DESCARTE = { "filas de total o vacias": "filas de totales del reporte, sin venta propia", "transacciones rechazadas (valor 0)": "cobros rechazados por la tarjeta, en $0", "filas sin valor": "filas en $0" };
+const DESCARTE = {
+  "filas de total o vacias": [" fila que era el total del reporte, no una venta", " filas que eran totales del reporte, no ventas"],
+  "transacciones rechazadas (valor 0)": [" cobro que la tarjeta rechaz\u00f3, en $0", " cobros que la tarjeta rechaz\u00f3, en $0"],
+  "filas sin valor": [" fila en $0", " filas en $0"],
+};
 function pintarArchivos(d) {
   $("#res-archivos").hidden = false;
   const p = d.pasos;
@@ -260,7 +264,8 @@ function pintarArchivos(d) {
     { t: "Archivo", html: (f) => `<span class="archivo">${esc(f.archivo)}</span>${f.periodo ? `<span class="sub">${esc(f.periodo)}</span>` : ""}` },
     { t: "Lector", html: (f) => `${esc(f.fuente)}${f.generico ? `<span class="sub">Columnas reconocidas</span>` : ""}${f.registrado ? `<span class="sub">Sistema registrado</span>` : ""}` },
     { t: "Filas usadas", num: true, html: (f) => {
-      const fuera = Object.entries(f.descartadas).filter(([, v]) => v).map(([k, v]) => `${entero(v)} ${DESCARTE[k] || k}`).join("; ");
+      const fuera = Object.entries(f.descartadas).filter(([, v]) => v)
+        .map(([k, v]) => entero(v) + (DESCARTE[k] ? DESCARTE[k][v === 1 ? 0 : 1] : " " + k)).join("; ");
       const avisos = (f.avisos || []).map((a) => `<span class="sub">${esc(a)}</span>`).join("");
       return `${entero(f.usadas)}${fuera ? `<span class="sub">No se contaron ${esc(fuera)}</span>` : ""}${avisos}`;
     } },
@@ -359,9 +364,9 @@ function pintarMaquinas() {
     { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina || "?")}</strong><span class="sub">${esc(f.locacion || f.maquina)}</span>` },
     { t: "Lector", v: (f) => f.fuente },
     { t: "Ciudad", html: (f) => (f.en_lista ? esc(f.ciudad || "Sin ciudad") : `<span class="estado estado-revisar">No está en la lista</span>`) },
-    { t: "Impuesto local", v: (f) => f.jurisdiccion || "" },
-    { t: "Ventas", num: true, v: (f) => dinero(f.ventas) },
-    { t: "Gravable", num: true, v: (f) => dinero(f.gravable) },
+    { t: "Impuesto local", html: (f) => f.jurisdiccion ? esc(f.jurisdiccion) : `<span class="sub">Solo el del estado</span>` },
+    { t: "Ventas", s: "Todo lo que cobr\u00f3", num: true, v: (f) => dinero(f.ventas) },
+    { t: "Gravable", s: "Sin agua ni lo ya gravado", num: true, v: (f) => dinero(f.gravable) },
   ], filas, ["Total", "", "", `${filas.length} máquinas`, dinero(filas.reduce((a, f) => a + f.ventas, 0)), dinero(filas.reduce((a, f) => a + f.gravable, 0))]);
 }
 $("#buscar-maquina").addEventListener("input", pintarMaquinas);
@@ -395,8 +400,8 @@ function pintarProductos(d) {
   $("#vista-productos .guia").textContent = porPct
     ? `Se resta el ${pct(d.pasos.devoluciones_pct)} de lo vendido por desperdicio: producto que se pierde o que la m\u00e1quina no entrega y nadie reclama. Es la regla del gerente. Los cupones del reporte, ${dinero(d.pasos.cupones_reporte)}, no entran en esta cuenta.`
     : d.pasos.cupones_empresa_cuentan
-      ? "Los que compra una empresa para sus empleados son venta. Los demás se devolvieron a clientes que reclamaron y se restan."
-      : `Los que compra una empresa para sus empleados (${dinero(d.pasos.cupones_empresa_fuera)} este mes) no cuentan: ni venta ni devolución. Los demás se devolvieron a clientes que reclamaron y se restan.`;
+      ? "Marque las máquinas donde una empresa compró los cupones para sus empleados: esos son venta y suman. Los que quedan sin marcar son los que se le devolvieron a un cliente que reclamó, y se restan."
+      : `Marque las máquinas donde una empresa compró los cupones para sus empleados: esos no cuentan ni como venta ni como devolución, porque la empresa los paga aparte (${dinero(d.pasos.cupones_empresa_fuera)} este mes). Los que quedan sin marcar se le devolvieron a un cliente que reclamó, y se restan.`;
   tabla($("#tabla-cupones"), [
     { t: "Lo compró una empresa", html: (f) => `<input type="checkbox" data-cupon="${esc(f.id_maquina)}" ${f.de_empresa ? "checked" : ""} ${porPct ? "disabled" : ""} aria-label="Cupones de empresa: ${esc(f.maquina)}">` },
     { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.locacion || f.maquina)}</span>` },
@@ -445,36 +450,38 @@ function pintarDeclaracion(d) {
   const p = d.pasos, c = d.declaracion;
   const porPct = p.devoluciones_metodo === "porcentaje";
   const filas = [
-    { c: "Ventas en efectivo y tarjeta", k: "ventas" },
-    ...(porPct || !p.cupones_empresa_cuentan ? [] : [{ c: "Cupones que compró una empresa", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
-    { c: porPct ? `Desperdicio, ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes", k: "devoluciones", menos: true },
-    { c: "Ventas netas", k: "neto", _clase: "fila-fuerte" },
-    { c: "Agua", k: "agua", menos: true },
-    { c: "Comprado con impuesto pagado", k: "walmart", menos: true },
-    { c: "Ventas gravables", k: "gravable", _clase: "fila-fuerte" },
+    { c: "Ventas del mes", s: "Todo lo que cobraron las máquinas", k: "ventas" },
+    ...(porPct || !p.cupones_empresa_cuentan ? [] : [{ c: "Cupones que compró una empresa", s: "Son venta: la empresa ya los pagó", k: "cupones_empresa" }, { c: "Ventas totales", k: "total", _clase: "fila-fuerte" }]),
+    { c: porPct ? `Desperdicio, el ${pct(p.devoluciones_pct)} de lo vendido` : "Cupones devueltos a clientes",
+      s: porPct ? "Producto que se pierde o que la máquina no entrega" : "Se le devolvieron a quien reclamó", k: "devoluciones", menos: true },
+    { c: "Ventas netas", s: "Es la venta real del mes", k: "neto", _clase: "fila-fuerte" },
+    { c: "Agua y bebidas exentas", s: "No pagan impuesto en Texas", k: "agua", menos: true },
+    { c: "Productos que ya pagaron impuesto", s: "Comprados en Walmart u otra tienda", k: "walmart", menos: true },
+    { c: "Ventas gravables", s: "Sobre esto se cobra el 6,25 % del estado", k: "gravable", _clase: "fila-fuerte" },
     ...Object.entries(d.reglas.jurisdicciones).flatMap(([n, j]) => [
-      { c: `Máquinas de ${j.ciudades.join(", ")}: ventas netas`, k: `bruto_${n}` },
-      { c: "Agua de esas máquinas", k: `agua_${n}`, menos: true },
-      { c: "Comprado con impuesto pagado de esas máquinas", k: `pagadas_${n}`, menos: true },
-      { c: `Base de ${j.nombre_comptroller}`, k: `base_${n}`, _clase: "fila-fuerte" },
+      { c: `Ventas netas de las máquinas de ${j.ciudades.join(", ")}`, k: `bruto_${n}` },
+      { c: "Agua y bebidas exentas de esas máquinas", k: `agua_${n}`, menos: true },
+      { c: "Productos que ya pagaron impuesto de esas máquinas", k: `pagadas_${n}`, menos: true },
+      { c: `Base de ${j.nombre_comptroller}`, s: `Sobre esto se cobra el ${pct(j.tasa)} local`, k: `base_${n}`, _clase: "fila-fuerte" },
     ]),
   ];
+  const monto = (f, col) => (f.menos && p[f.k][col] ? "−" : "") + dinero(p[f.k][col]);
   tabla($("#tabla-cascada"), [
-    { t: "", v: (f) => (f.menos ? "menos " : "") + f.c },
-    { t: "Efectivo", num: true, v: (f) => dinero(p[f.k].efectivo) },
-    { t: "Tarjeta", num: true, v: (f) => dinero(p[f.k].tarjeta) },
-    { t: "Total", num: true, v: (f) => dinero(p[f.k].total) },
+    { t: "", html: (f) => `${esc(f.c)}${f.s ? `<span class="sub">${esc(f.s)}</span>` : ""}` },
+    { t: "Efectivo", num: true, v: (f) => monto(f, "efectivo") },
+    { t: "Tarjeta", num: true, v: (f) => monto(f, "tarjeta") },
+    { t: "Total", num: true, v: (f) => monto(f, "total") },
   ], filas);
 
   tabla($("#tabla-comptroller"), [
-    { t: "Campo", html: (f) => `${esc(f.c)}${f.s ? `<span class="sub">${esc(f.s)}</span>` : ""}` },
-    { t: "Tasa", num: true, v: (f) => f.t || "" },
-    { t: "Valor", num: true, html: (f) => copiable(f.v, entero(f.v)) },
+    { t: "Casilla del formulario", html: (f) => `${esc(f.c)}<span class="sub">${esc(f.s)}</span>` },
+    { t: "Valor que se digita", num: true, html: (f) => copiable(f.v, entero(f.v)) },
   ], [
-    { c: "Total Texas Sales", v: c.total_ventas },
-    { c: "Taxable Sales", v: c.ventas_gravables, t: pct(c.tasa_estado) },
-    { c: "Taxable Purchases", v: 0 },
-    ...c.locales.map((l) => ({ c: l.nombre_comptroller, s: `${l.codigo} · ${l.maquinas} máquinas`, v: l.base, t: pct(l.tasa) })),
+    { c: "Total Texas Sales", s: "Las ventas netas del mes, antes de quitar agua y lo ya gravado", v: c.total_ventas },
+    { c: "Taxable Sales", s: `Sobre esto se cobra el ${pct(c.tasa_estado)} del estado`, v: c.ventas_gravables },
+    { c: "Taxable Purchases", s: "Lo que la empresa compró sin pagar impuesto y usa ella misma. Aquí no aplica", v: 0 },
+    ...c.locales.map((l) => ({ c: l.nombre_comptroller,
+      s: `Código ${l.codigo} · ${l.maquinas} máquinas · ${pct(l.tasa)} local`, v: l.base })),
   ]);
   pintarEnvio();
 }

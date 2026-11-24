@@ -33,6 +33,8 @@ FIRMAS = {
     "AV360": {"machine", "product", "quantity sold", "cash", "credit", "coupon"},
     "XMAI": {"machine", "item name", "items sold", "sales revenue"},
     "Qingo": {"machine", "product name", "sales quantity", "sales amount ($)"},
+    # Qingo tambien exporta el reporte de la tienda, sin columna de maquina porque es una sola
+    "Qingo tienda": {"product name", "sales quantity", "sales amount (usd)"},
 }
 
 
@@ -231,7 +233,8 @@ def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos:
             hallado = _buscar_encabezado(crudo)
             if hallado:
                 sistema, fila = hallado
-                lector = {"Nayax": _nayax, "AV360": _av360, "XMAI": _xmai, "Qingo": _qingo}[sistema]
+                lector = {"Nayax": _nayax, "AV360": _av360, "XMAI": _xmai,
+                          "Qingo": _qingo, "Qingo tienda": _qingo_tienda}[sistema]
                 return terminar(lector(tabla(crudo, fila)), crudo, fila)
         for formato in formatos or []:
             m = {k: v for k, v in (formato.get("mapeo") or {}).items() if v}
@@ -253,8 +256,11 @@ def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos:
             df = tabla(crudo, fila)
             df = df.loc[:, [c for c in df.columns if c and c != "nan"]]
             return terminar(_generico(df, m, Path(archivo).stem[:24]), crudo, fila)
-        if not columnas and len(crudo):
-            columnas = [str(c) for c in crudo.iloc[0].tolist() if pd.notna(c)]
+        if len(crudo):   # para preguntar, se ofrece la fila que mas parece el encabezado
+            for i in range(min(15, len(crudo))):
+                cand = [re.sub(r"\s+", " ", str(c)).strip() for c in crudo.iloc[i].tolist() if pd.notna(c)]
+                if len(cand) > len(columnas):
+                    columnas = cand
     raise FormatoDesconocido(f"No se reconocieron las columnas de {archivo}. Indique cuál es cada una.",
                              columnas, proponer_mapeo(columnas))
 
@@ -341,6 +347,22 @@ def _av360(df: pd.DataFrame) -> Lectura:
                     cuenta=_num(df["Account"]) if "Account" in df else 0.0,
                     impuesto=_num(df["Tax"]) if "Tax" in df else None)
     return Lectura("", "AV360", filas, leidas, {"filas de total o vacias": totales})
+
+
+def _qingo_tienda(df: pd.DataFrame) -> Lectura:
+    """Reporte de tienda de Qingo: una fila por producto, sin columna de maquina.
+
+    Qingo tiene una sola maquina por tienda y en este export no la escribe, asi que se toma la que
+    quedo configurada para el lector. Todo lo que cobra Qingo es con tarjeta: la maquina no recibe
+    efectivo ni entrega cupones, por eso no hay columnas de esos dos.
+    """
+    leidas = len(df)
+    ok = df["Product Name"].notna() & (df["Product Name"].astype(str).str.strip() != "")
+    df, totales = df[ok], int((~ok).sum())
+    maquina = pd.Series(maquina_por_lector().get("Qingo", ""), index=df.index)
+    filas = _salida("Qingo", maquina, df["Product Name"], _num(df["Sales Quantity"]),
+                    tarjeta=_num(df["Sales Amount (USD)"]))
+    return Lectura("", "Qingo", filas, leidas, {"filas de total o vacias": totales})
 
 
 def _xmai(df: pd.DataFrame) -> Lectura:
