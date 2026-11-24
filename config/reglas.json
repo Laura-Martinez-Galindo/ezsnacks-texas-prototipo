@@ -1,37 +1,41 @@
 {
-  "_nota": "Reglas del cierre mensual de EzSnack Texas. Devoluciones: los cupones de reembolso del mes (los que compran las empresas son venta). Agua: todo producto que diga water, como lo filtra el gerente.",
-  "tasa_estado": 6.25,
-  "tasa_compras": 6.25,
-  "descuento_a_tiempo_pct": 0.5,
-  "cupones_empresa_minimo": 100,
-  "cupones_empresa_cuentan": false,
-  "devoluciones": {
-    "metodo": "cupones",
-    "porcentaje": 3.0
+ "_nota": "Reglas del cierre mensual de EzSnack Texas. Devoluciones: los cupones de reembolso del mes (los que compran las empresas son venta). Agua: todo producto que diga water, como lo filtra el gerente. Lectores que no traen el numero de maquina (XMAI en tiendas, Qingo): se les asigna la maquina de maquina_por_lector.",
+ "tasa_estado": 6.25,
+ "tasa_compras": 6.25,
+ "descuento_a_tiempo_pct": 0.5,
+ "cupones_empresa_minimo": 100,
+ "cupones_empresa_cuentan": false,
+ "devoluciones": {
+  "metodo": "cupones",
+  "porcentaje": 3.0
+ },
+ "jurisdicciones": {
+  "Houston": {
+   "codigo": "2101017",
+   "nombre_comptroller": "HOUSTON-CITY",
+   "tasa": 1.0,
+   "ciudades": [
+    "Houston"
+   ]
   },
-  "jurisdicciones": {
-    "Houston": {
-      "codigo": "2101017",
-      "nombre_comptroller": "HOUSTON-CITY",
-      "tasa": 1.0,
-      "ciudades": [
-        "Houston"
-      ]
-    },
-    "Houston MTA": {
-      "codigo": "3101990",
-      "nombre_comptroller": "HOUSTON MTA",
-      "tasa": 1.0,
-      "ciudades": [
-        "Bellaire",
-        "Katy",
-        "Spring"
-      ]
-    }
-  },
-  "agua_palabras": [
-    "water",
-    "agua"
-  ],
-  "agua_excepciones": []
+  "Houston MTA": {
+   "codigo": "3101990",
+   "nombre_comptroller": "HOUSTON MTA",
+   "tasa": 1.0,
+   "ciudades": [
+    "Bellaire",
+    "Katy",
+    "Spring"
+   ]
+  }
+ },
+ "agua_palabras": [
+  "water",
+  "agua"
+ ],
+ "agua_excepciones": [],
+ "maquina_por_lector": {
+  "XMAI": "160",
+  "Qingo": "159"
+ }
 }

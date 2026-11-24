@@ -245,6 +245,22 @@ def leer(fuente, nombre: str | None = None, mapeo: dict | None = None, formatos:
                              columnas, proponer_mapeo(columnas))
 
 
+def maquina_por_lector() -> dict[str, str]:
+    """Lectores que no escriben el numero de maquina en su reporte.
+
+    XMAI, en las tiendas, pone su propio nombre en la columna de maquina en vez de
+    'EzSnack 160 - ...', y el reporte de tienda de Qingo ni siquiera trae la columna. Sin esto
+    esas ventas quedarian fuera del cierre por 'maquina que no esta en la lista'.
+    """
+    try:
+        import json
+        from pathlib import Path as _P
+        ruta = _P(__file__).resolve().parents[1] / "config" / "reglas.json"
+        return {str(k): str(v) for k, v in (json.loads(ruta.read_text(encoding="utf-8")).get("maquina_por_lector") or {}).items()}
+    except Exception:
+        return {}
+
+
 def _salida(fuente: str, maquina, producto, cantidad, **dinero) -> pd.DataFrame:
     out = pd.DataFrame({"fuente": fuente, "maquina": maquina.astype(str).str.strip(),
                         "producto": producto.astype(str).str.strip(), "cantidad": cantidad})
@@ -253,6 +269,9 @@ def _salida(fuente: str, maquina, producto, cantidad, **dinero) -> pd.DataFrame:
     for c in EXTRAS:  # datos que solo traen algunos lectores
         out[c] = dinero.get(c)
     out["id_maquina"] = out["maquina"].map(id_maquina)
+    predeterminada = maquina_por_lector().get(fuente)
+    if predeterminada and out["id_maquina"].isna().any():
+        out["id_maquina"] = out["id_maquina"].fillna(predeterminada)
     out["archivo"] = ""
     return out[COLUMNAS]
 
@@ -283,9 +302,13 @@ def _nayax(df: pd.DataFrame) -> Lectura:
     es_efectivo = metodo.str.startswith("cash")
     es_prepago = metodo.str.startswith("prepaid")
     es_otro = metodo.str.startswith("monyx")
-    es_tarjeta = ~(es_efectivo | es_prepago | es_otro)
+    # Nayax tambien entrega cupones: van en su propia columna, no como tarjeta, para que el total
+    # de cupones del mes cuadre con el que lleva el gerente.
+    es_cupon = metodo.str.startswith("coupon")
+    es_tarjeta = ~(es_efectivo | es_prepago | es_otro | es_cupon)
     filas = _salida("Nayax", df["Machine Name"], df["Product Name"], cant,
                     efectivo=valor.where(es_efectivo, 0.0), tarjeta=valor.where(es_tarjeta, 0.0),
+                    cupones=valor.where(es_cupon, 0.0),
                     prepago=valor.where(es_prepago, 0.0), otros=valor.where(es_otro, 0.0))
     lectura = Lectura("", "Nayax", filas, leidas, {"filas de total o vacias": totales,
                                                    "transacciones rechazadas (valor 0)": int(declinadas.sum())})
