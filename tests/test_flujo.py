@@ -127,12 +127,15 @@ def test_resumen_es_la_suma_de_las_maquinas(lecturas, dev):
     assert estado["base"] == pytest.approx(p["gravable"]["total"], abs=0.005)
 
 
-def test_devoluciones_por_porcentaje_como_el_excel_a_mano(lecturas):
-    r = _cierre(lecturas, devoluciones={"metodo": "porcentaje", "porcentaje": 3})
-    p = r["pasos"]
-    assert p["cupones_empresa"]["total"] == 0
-    assert p["neto"]["total"] == pytest.approx(p["ventas"]["total"] * 0.97, abs=1.0)   # centavos por maquina
-    assert p["devoluciones"]["total"] == pytest.approx(p["ventas"]["total"] - p["neto"]["total"], abs=0.005)
+def test_el_desperdicio_se_resta_ademas_de_los_cupones(lecturas):
+    """Los cupones de reembolso siempre se restan; si ademas se marca desperdicio, se resta encima."""
+    solo_cupones = _cierre(lecturas, devoluciones={"metodo": "cupones"})["pasos"]
+    con_desperdicio = _cierre(lecturas, devoluciones={"metodo": "porcentaje", "porcentaje": 3})["pasos"]
+    cupones = solo_cupones["devoluciones"]["total"]
+    assert cupones > 0
+    neto_sin_desperdicio = solo_cupones["neto"]["total"]
+    assert con_desperdicio["neto"]["total"] == pytest.approx(neto_sin_desperdicio * 0.97, abs=1.0)
+    assert con_desperdicio["devoluciones"]["total"] > cupones
 
 
 def test_nayax_resta_las_devoluciones_en_negativo():

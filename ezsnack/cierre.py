@@ -95,11 +95,13 @@ def _c(x) -> float:
 
 
 def impuesto_esperado(maquinas: pd.DataFrame, R: dict) -> list[dict]:
-    """Lo que debe devolver QuickBooks: por cada tasa, la base y el impuesto sumando recibo por recibo.
+    """Lo que debe devolver QuickBooks: por cada tasa, la base y el impuesto.
 
-    QuickBooks calcula el impuesto de cada recibo y lo redondea al centavo, asi que el total del mes
-    es la suma de esos redondeos y no la tasa por la base total. Aqui se calcula igual.
+    QuickBooks redondea al centavo el impuesto de cada recibo, asi que el total del mes depende de
+    como se agrupen los recibos: con un recibo por tasa se redondea una sola vez sobre la base
+    total (como lo liquida el Comptroller) y con un recibo por maquina se suman los redondeos.
     """
+    por_tasa = str((R.get("contabilidad") or {}).get("recibos") or "maquina") == "jurisdiccion"
     J = R["jurisdicciones"]
     estado = f"TX estado {R['tasa_estado']:g}%"
     filas = {estado: {"jurisdiccion": estado, "tasa": float(R["tasa_estado"]), "base": 0.0, "impuesto": 0.0}}
@@ -108,14 +110,18 @@ def impuesto_esperado(maquinas: pd.DataFrame, R: dict) -> list[dict]:
         if g <= 0:
             continue
         filas[estado]["base"] += g
-        filas[estado]["impuesto"] += _c(g * R["tasa_estado"] / 100)
+        if not por_tasa:
+            filas[estado]["impuesto"] += _c(g * R["tasa_estado"] / 100)
         j = J.get(m["jurisdiccion"])
         if j:
             nombre = f"{j['nombre_comptroller']} {j['tasa']:g}%"
             f = filas.setdefault(nombre, {"jurisdiccion": nombre, "tasa": float(j["tasa"]), "base": 0.0, "impuesto": 0.0})
             f["base"] += g
-            f["impuesto"] += _c(g * j["tasa"] / 100)
+            if not por_tasa:
+                f["impuesto"] += _c(g * j["tasa"] / 100)
     for f in filas.values():
+        if por_tasa:
+            f["impuesto"] = _c(f["base"] * f["tasa"] / 100)
         f["base"], f["impuesto"] = round(f["base"], 2), round(f["impuesto"], 2)
     return list(filas.values())
 
@@ -183,16 +189,15 @@ def calcular(integ: pd.DataFrame, a: Ajustes, anio: int, mes: int) -> dict:
           .reset_index())
     for c in sumas[1:]:
         pm[c] = pm[c].map(_c)
+    # Los cupones de reembolso siempre se restan. Los que compran las empresas para sus empleados
+    # se cobran aparte: por defecto no cuentan ni como venta ni como devolucion.
+    if not R.get("cupones_empresa_cuentan", False):
+        pm["cup_emp"] = 0.0
+    pm["neto_e"], pm["neto_t"] = pm["efectivo"], (pm["tarjeta"] + pm["cup_emp"] - pm["cup_dev"]).map(_c)
     if por_pct:
+        # El desperdicio se resta ademas de los cupones, no en su lugar.
         factor = 1 - dev["porcentaje"] / 100
-        pm["neto_e"], pm["neto_t"] = (pm["efectivo"] * factor).map(_c), (pm["tarjeta"] * factor).map(_c)
-        pm["cup_emp"], pm["cup_dev"] = 0.0, 0.0
-    else:
-        # Los cupones que compran las empresas para sus empleados se cobran aparte: por defecto no
-        # cuentan ni como venta ni como devolucion. Solo restan los cupones de reembolso.
-        if not R.get("cupones_empresa_cuentan", False):
-            pm["cup_emp"] = 0.0
-        pm["neto_e"], pm["neto_t"] = pm["efectivo"], (pm["tarjeta"] + pm["cup_emp"] - pm["cup_dev"]).map(_c)
+        pm["neto_e"], pm["neto_t"] = (pm["neto_e"] * factor).map(_c), (pm["neto_t"] * factor).map(_c)
     pm["dev_e"] = (pm["efectivo"] - pm["neto_e"]).map(_c)
     pm["dev_t"] = (pm["tarjeta"] + pm["cup_emp"] - pm["neto_t"]).map(_c)   # = cupones de reembolso
     pm["unidades"] = pm["cantidad"].astype(float)
