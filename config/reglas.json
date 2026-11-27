@@ -1,5 +1,5 @@
 {
- "_nota": "Reglas del cierre mensual de EzSnack Texas. Se resta un 3 % por desperdicio, como lo hace el gerente en su Excel (x0.97); la otra opcion es restar los cupones de reembolso del mes. Agua: todo producto que diga water, como lo filtra el gerente. Lectores que no traen el numero de maquina (XMAI en tiendas, Qingo): se les asigna la maquina de maquina_por_lector.",
+ "_nota": "Reglas del cierre mensual de EzSnack Texas. Se resta un 3 % por desperdicio, como lo hace el gerente en su Excel (x0.97); la otra opcion es restar los cupones de reembolso del mes. Agua: todo producto que diga water, como lo filtra el gerente. Lectores que no traen el numero de maquina (XMAI en tiendas, Qingo): se les asigna la maquina de maquina_por_lector. Empresas que compran cupones para sus empleados: Hoerbiger (28 y 60) y Rich (38 y 73).",
  "tasa_estado": 6.25,
  "tasa_compras": 6.25,
  "descuento_a_tiempo_pct": 0.5,
@@ -46,5 +46,11 @@
  },
  "contabilidad": {
   "recibos": "jurisdiccion"
- }
+ },
+ "cupones_empresas": [
+  "28",
+  "60",
+  "38",
+  "73"
+ ]
 }

@@ -83,6 +83,14 @@
           <span class="ranura-ayuda">Columna Product</span>
           <span class="ranura-archivo"></span>
         </label>
+        <div class="carga-desperdicio">
+          <label class="casilla">
+            <input type="checkbox" id="usar-desperdicio" checked>
+            <span>Restar desperdicio</span>
+          </label>
+          <span class="campo-unidad"><input type="number" id="pct-desperdicio" min="0" max="100" step="0.1" value="3"><span>%</span></span>
+          <small>Producto que se pierde o que la m&aacute;quina no entrega y nadie reclama. Si lo desmarca, en vez del desperdicio se restan los cupones que s&iacute; se devolvieron.</small>
+        </div>
         <div class="carga-acciones">
           <button class="boton" type="submit" id="btn-calcular">Unir ventas</button>
           <button class="enlace" type="button" id="btn-ejemplo">Probar con archivos de ejemplo</button>

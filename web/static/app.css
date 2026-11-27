@@ -418,3 +418,8 @@ body:not([data-rol="admin"]) [data-rol="admin"] { display: none !important; }
 .guardar-reglas input { max-width: 100%; }
 .agregar .oculto { width: 1px; max-width: 1px; flex: none; padding: 0; border: 0; min-height: 0; }
 #vista-reglas h4 { margin: 1.8rem 0 .4rem; font-size: 1rem; color: var(--marino); }
+
+/* Desperdicio en el paso 1 */
+.carga-desperdicio { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.carga-desperdicio small { flex: 1 1 100%; color: var(--tenue); }
+.carga-desperdicio .casilla { display: flex; align-items: center; gap: 6px; font-weight: 600; }

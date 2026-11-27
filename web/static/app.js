@@ -177,7 +177,10 @@ $$(".ranura input").forEach((inp) => inp.addEventListener("change", () => {
 }));
 
 function ajustes() {
-  return { exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados, cupones_empresa: estado.ajustes.cupones_empresa };
+  const usa = $("#usar-desperdicio")?.checked;
+  return { exentos: estado.ajustes.exentos, pagados: estado.ajustes.pagados, cupones_empresa: estado.ajustes.cupones_empresa,
+           devoluciones: usa === undefined ? undefined
+             : { metodo: usa ? "porcentaje" : "cupones", porcentaje: +$("#pct-desperdicio").value || 0 } };
 }
 
 async function subir(form) {
@@ -479,6 +482,8 @@ function agregar(input, clave) {
   input.focus();
   recalcular();
 }
+$("#usar-desperdicio").addEventListener("change", () => { $("#pct-desperdicio").disabled = !$("#usar-desperdicio").checked; recalcular(); });
+$("#pct-desperdicio").addEventListener("change", recalcular);
 $("#btn-otro-exento").addEventListener("click", () => agregar($("#otro-exento"), "exentos"));
 $("#btn-otro-pagado").addEventListener("click", () => agregar($("#otro-pagado"), "pagados"));
 $("#btn-otra-pareja").addEventListener("click", () => {
