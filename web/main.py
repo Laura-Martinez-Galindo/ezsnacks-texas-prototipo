@@ -499,7 +499,7 @@ def _catalogo() -> dict:
 
 
 def _calcular(c: dict, anio: int, mes: int, ajustes: dict | None) -> dict:
-    a = cie.Ajustes.de({k: v for k, v in (ajustes or {}).items() if k in ("exentos", "pagados", "cupones_empresa")})
+    a = cie.Ajustes.de({k: v for k, v in (ajustes or {}).items() if k in ("exentos", "pagados", "cupones_empresa", "devoluciones") and v is not None})
     a.lista_pagados = c["lista_pagados"]
     a.catalogo = _catalogo()
     unidos = alm.equivalencias()["unidos"]
