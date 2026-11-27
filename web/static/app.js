@@ -1008,8 +1008,12 @@ document.addEventListener("click", async (ev) => {
         { t: "Impuesto según el Comptroller", v: d.impuesto_total },
       ]);
       const dev = c.reglas.devoluciones;
-      $("#nota-detalle").textContent = `Reglas de ese cierre: estado ${pct(c.reglas.tasa_estado)}, devoluciones ${dev.metodo === "porcentaje" ? `al ${pct(dev.porcentaje)}` : "por cupones"}. `
-        + `Archivos: ${c.archivos.map((a) => `${a.fuente} (${a.archivo})`).join(", ")}.`;
+      const marcado = c.reglas.marcado_del_mes || {};
+      const lista = (t, xs) => (xs && xs.length ? ` ${t}: ${xs.join(", ")}.` : "");
+      $("#nota-detalle").textContent = `Reglas de ese cierre: estado ${pct(c.reglas.tasa_estado)}, ${dev.metodo === "porcentaje" ? `desperdicio del ${pct(dev.porcentaje)}` : "sin desperdicio"}, cupones de reembolso restados. `
+        + `Archivos: ${c.archivos.map((a) => `${a.fuente} (${a.archivo})`).join(", ")}.`
+        + lista("Se marcó como exento", marcado.exentos)
+        + lista("Se marcó como comprado con impuesto ya pagado", marcado.pagados);
       tabla($("#tabla-detalle-maquinas"), [
         { t: "Máquina", html: (f) => `<strong>${esc(f.id_maquina)}</strong><span class="sub">${esc(f.maquina)}</span>` },
         { t: "Ciudad", v: (f) => f.ciudad }, { t: "Impuesto local", v: (f) => f.jurisdiccion },

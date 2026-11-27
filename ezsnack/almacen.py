@@ -519,6 +519,10 @@ def autenticar(usuario: str, clave: str) -> dict | None:
 def guardar_cierre(anio: int, mes: int, res: dict, archivos: list[dict], usuario: str, envio: dict | None = None) -> dict:
     """Guarda (o reemplaza) el cierre de un mes con las reglas que tenia. Un cierre declarado no se toca."""
     R = {k: v for k, v in res["reglas"].items() if k != "_version"}
+    # Queda guardado que se marco como exento y que como ya gravado ese mes: sin esto el cierre
+    # no se puede auditar despues, que es justo lo que le pasa al Excel hecho a mano.
+    R["marcado_del_mes"] = {"exentos": list(res.get("lista_exentos") or []),
+                            "pagados": list(res.get("lista_pagados") or [])}
     version = res["reglas"].get("_version", {})
     pm = res["maquinas"]
     with motor().begin() as c:
